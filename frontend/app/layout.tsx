@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Inter, Playfair_Display, JetBrains_Mono } from "next/font/google";
 import Link from "next/link";
 import "./globals.css";
 
@@ -8,16 +8,21 @@ const inter = Inter({
   variable: "--font-inter",
 });
 
+const playfair = Playfair_Display({
+  subsets: ["latin"],
+  variable: "--font-playfair",
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-jetbrains",
+});
+
 export const metadata: Metadata = {
-  title: "Identity Reconstruction — CKYC & Biometric Liveness",
+  title: "ChainProof — Cinematic Identity Verification Platform",
   description:
-    "Next-generation identity verification powered by physiological signal analysis, cryptographic hash chaining, and autonomous liveness verification.",
-  keywords: ["identity verification", "biometric liveness", "CKYC", "deepfake defense", "cryptographic audit"],
-  openGraph: {
-    title: "Identity Reconstruction — CKYC & Biometric Liveness",
-    description: "Next-generation autonomous identity verification and deepfake defense platform.",
-    type: "website",
-  },
+    "Autonomous CKYC identity verification with wire-hashed archival, deterministic facial matching, and cryptographic hash chain sealing.",
+  keywords: ["ChainProof", "identity verification", "CKYC", "biometric liveness", "cryptographic audit"],
 };
 
 export default function RootLayout({
@@ -26,9 +31,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={inter.variable} suppressHydrationWarning>
-      <body className="antialiased" suppressHydrationWarning>
-        {/* Customer-Facing Clean Header */}
+    <html lang="en" className={`${inter.variable} ${playfair.variable} ${jetbrainsMono.variable}`} suppressHydrationWarning>
+      <body className="antialiased font-sans" suppressHydrationWarning>
+        {/* Minimal Customer Navigation */}
         <header
           style={{
             position: "fixed",
@@ -36,23 +41,23 @@ export default function RootLayout({
             left: 0,
             right: 0,
             zIndex: 50,
-            backdropFilter: "blur(16px)",
-            WebkitBackdropFilter: "blur(16px)",
-            background: "rgba(5, 8, 17, 0.75)",
-            borderBottom: "1px solid rgba(255, 255, 255, 0.07)",
-            padding: "0.85rem 2rem",
+            backdropFilter: "blur(12px)",
+            WebkitBackdropFilter: "blur(12px)",
+            background: "rgba(0, 0, 0, 0.75)",
+            borderBottom: "1px solid rgba(39, 39, 42, 0.6)",
+            padding: "1rem 2.5rem",
           }}
         >
           <div
             style={{
-              maxWidth: "1350px",
+              maxWidth: "1400px",
               margin: "0 auto",
               display: "flex",
               justifyContent: "space-between",
               alignItems: "center",
             }}
           >
-            {/* Minimal Brand Logo */}
+            {/* Left: ChainProof Minimal Logo */}
             <Link
               href="/"
               style={{
@@ -64,125 +69,114 @@ export default function RootLayout({
             >
               <div
                 style={{
-                  width: "30px",
-                  height: "30px",
-                  borderRadius: "8px",
-                  background: "linear-gradient(135deg, #a855f7 0%, #06b6d4 100%)",
+                  width: "16px",
+                  height: "16px",
+                  border: "1px solid #3B82F6",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  fontSize: "14px",
-                  boxShadow: "0 0 15px rgba(168, 85, 247, 0.4)",
                 }}
               >
-                ◈
+                <div style={{ width: "6px", height: "6px", backgroundColor: "#3B82F6" }} />
               </div>
-              <div style={{ display: "flex", flexDirection: "column" }}>
-                <span
-                  style={{
-                    fontSize: "0.95rem",
-                    fontWeight: 800,
-                    letterSpacing: "0.08em",
-                    textTransform: "uppercase",
-                    background: "linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%)",
-                    WebkitBackgroundClip: "text",
-                    WebkitTextFillColor: "transparent",
-                  }}
-                >
-                  Identity Reconstruction
-                </span>
-                <span style={{ fontSize: "0.65rem", color: "#64748b", letterSpacing: "0.05em" }}>
-                  SECURE IDENTITY PLATFORM
-                </span>
-              </div>
+              <span
+                style={{
+                  fontFamily: "var(--font-sans)",
+                  fontSize: "0.95rem",
+                  fontWeight: 600,
+                  letterSpacing: "0.05em",
+                  color: "#FFFFFF",
+                  textTransform: "uppercase",
+                }}
+              >
+                ChainProof
+              </span>
             </Link>
 
-            {/* System Status & Clean Action */}
-            <div style={{ display: "flex", alignItems: "center", gap: "1.25rem" }}>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "7px",
-                  padding: "4px 12px",
-                  borderRadius: "999px",
-                  background: "rgba(16, 185, 129, 0.08)",
-                  border: "1px solid rgba(16, 185, 129, 0.2)",
-                  fontSize: "0.75rem",
-                  color: "#10b981",
-                  fontWeight: 600,
-                  letterSpacing: "0.03em",
-                }}
-              >
-                <span
-                  style={{
-                    width: "6px",
-                    height: "6px",
-                    borderRadius: "50%",
-                    backgroundColor: "#10b981",
-                    boxShadow: "0 0 8px #10b981",
-                  }}
-                />
-                SYSTEM READY
-              </div>
-
+            {/* Center/Right: Restrained Navigation */}
+            <div style={{ display: "flex", alignItems: "center", gap: "2rem" }}>
               <a
-                href="#verification-hero"
+                href="#how-it-works"
                 style={{
+                  color: "var(--text-muted)",
                   textDecoration: "none",
                   fontSize: "0.825rem",
-                  fontWeight: 600,
-                  color: "#ffffff",
-                  background: "linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%)",
-                  padding: "6px 16px",
-                  borderRadius: "8px",
-                  boxShadow: "0 0 15px rgba(124, 58, 237, 0.3)",
-                  transition: "all 0.2s ease",
+                  fontWeight: 500,
+                  transition: "color 0.15s ease",
                 }}
               >
-                Start Verification →
+                How it works
               </a>
+              <a
+                href="#security"
+                style={{
+                  color: "var(--text-muted)",
+                  textDecoration: "none",
+                  fontSize: "0.825rem",
+                  fontWeight: 500,
+                  transition: "color 0.15s ease",
+                }}
+              >
+                Security
+              </a>
+              <Link
+                href="/onboarding"
+                className="btn-primary-blue"
+                style={{
+                  padding: "0.5rem 1.25rem",
+                  fontSize: "0.825rem",
+                }}
+              >
+                Get Started →
+              </Link>
             </div>
           </div>
         </header>
 
-        {/* Main Experience Body */}
+        {/* Main Experience */}
         <main>{children}</main>
 
-        {/* Discreet Customer Footer with Reviewer Portal Link */}
+        {/* Minimal Customer Footer */}
         <footer
           style={{
-            borderTop: "1px solid rgba(255, 255, 255, 0.06)",
-            background: "rgba(5, 8, 17, 0.95)",
-            padding: "2.5rem 2rem",
-            marginTop: "4rem",
+            borderTop: "1px solid var(--border-color)",
+            background: "#000000",
+            padding: "3rem 2.5rem",
+            position: "relative",
+            zIndex: 20,
           }}
         >
           <div
             style={{
-              maxWidth: "1350px",
+              maxWidth: "1400px",
               margin: "0 auto",
               display: "flex",
-              flexDirection: "row",
               justifyContent: "space-between",
               alignItems: "center",
               flexWrap: "wrap",
               gap: "1.5rem",
             }}
           >
-            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-              <span style={{ fontSize: "0.85rem", fontWeight: 700, color: "#94a3b8" }}>
-                Identity Reconstruction · Autonomous CKYC
-              </span>
-              <span style={{ fontSize: "0.75rem", color: "#475569" }}>
-                ISO/IEC 30107-3 Liveness Compliant · Cryptographic SHA-256 Audit Chain · Zero Client Secret Exposure
+            {/* Left Info */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <span style={{ fontSize: "0.9rem", fontWeight: 600, color: "#FFFFFF" }}>
+                  ChainProof
+                </span>
+                <span style={{ fontSize: "0.8rem", color: "var(--text-dim)" }}>·</span>
+                <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
+                  Identity Reconstruction · Deepfake-aware CKYC
+                </span>
+              </div>
+              <span style={{ fontSize: "0.75rem", fontFamily: "var(--font-mono)", color: "var(--text-dim)" }}>
+                Cryptographic SHA-256 Audit Chain · Multi-Stage Verification
               </span>
             </div>
 
-            {/* Discreet, Low-Contrast Institution & Reviewer Link */}
+            {/* Right: Discreet Reviewer Portal Route */}
             <div>
               <Link href="/review" className="footer-reviewer-link">
-                <span>🔒</span> Institution / Reviewer Portal
+                <span>🔒</span> Institution / Reviewer Login →
               </Link>
             </div>
           </div>

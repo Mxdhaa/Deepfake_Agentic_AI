@@ -234,3 +234,55 @@ export async function verifyAuditChain(
   });
   return handleResponse<ChainVerificationResult>(res);
 }
+
+/**
+ * Submit video clip to /api/v1/liveness/analyze
+ */
+export async function analyzeLiveness(clip: File | Blob): Promise<{
+  session_id: string;
+  deepfake_score: number;
+  challenge_match: boolean;
+  blink_rate_bpm: number;
+  av_sync_ms: number;
+  anomaly_score: number;
+  decision: "pass" | "borderline" | "fail" | string;
+  video_sha256: string;
+}> {
+  const form = new FormData();
+  form.append("clip", clip, "liveness.mp4");
+  const res = await fetch(`${BASE_URL}/api/v1/liveness/analyze`, {
+    method: "POST",
+    body: form,
+  });
+  return handleResponse<any>(res);
+}
+
+/**
+ * Execute full multi-stage pipeline evaluation
+ */
+export async function evaluatePipeline(payload: {
+  kin_token: string;
+  legal_name: string;
+  device_id: string;
+  webrtc_jitter_ms?: number;
+  cosine_similarity_score?: number;
+  registry_velocity_6hr?: number;
+  challenge_match?: boolean;
+  deepfake_score?: number;
+  blink_rate_bpm?: number;
+  av_sync_ms?: number;
+}): Promise<{
+  session_id: string;
+  status: "approved" | "rejected" | "escalated_for_review" | string;
+  final_decision: "pass" | "borderline" | "fail" | string;
+  escalated_to_stage3: boolean;
+  reason: string;
+}> {
+  const res = await fetch(`${BASE_URL}/api/v1/agent/evaluate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<any>(res);
+}
+
