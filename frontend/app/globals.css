@@ -179,3 +179,26 @@ body::after {
 ::-webkit-scrollbar       { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* Discreet Footer Reviewer Link */
+.footer-reviewer-link {
+  color: #475569;
+  text-decoration: none;
+  font-size: 0.75rem;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.02);
+  transition: all 0.2s ease;
+}
+
+.footer-reviewer-link:hover {
+  color: #94a3b8;
+  border-color: rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.05);
+}
+
