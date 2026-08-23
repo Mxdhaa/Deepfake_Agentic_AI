@@ -593,7 +593,7 @@ export default function IdentityReconstructionLanding() {
           >
             {[
               { label: "LEGAL CLAIM", value: "Verified Identity Token", icon: <UserCheck size={16} /> },
-              { label: "BIOMETRIC EMBEDDING", value: "512-D Cosine Vector (0.91)", icon: <Fingerprint size={16} /> },
+              { label: "BIOMETRIC EMBEDDING", value: "Facial Template", icon: <Fingerprint size={16} /> },
               { label: "NETWORK VELOCITY", value: "Single Device · 0 Fails", icon: <Activity size={16} /> },
               { label: "CREDENTIAL TYPE", value: "Sovereign Passport / CKYC", icon: <FileText size={16} /> },
             ].map((chip) => (
@@ -1156,10 +1156,10 @@ export default function IdentityReconstructionLanding() {
                 </div>
                 <div>
                   <h3 style={{ fontSize: "1.25rem", fontWeight: 800, color: "#ffffff" }}>
-                    Live CKYC Pipeline Verification
+                    Identity Verification
                   </h3>
                   <span style={{ fontSize: "0.75rem", color: "#64748b" }}>
-                    Stage 1 (Liveness) → Stage 2 (Identity) → Stage 3 (Agent)
+                    Document Verification & Live Presence Check
                   </span>
                 </div>
               </div>
@@ -1168,7 +1168,7 @@ export default function IdentityReconstructionLanding() {
                 <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
                   <div>
                     <label style={{ fontSize: "0.8rem", color: "#94a3b8", display: "block", marginBottom: "6px" }}>
-                      Applicant Name
+                      Applicant Legal Name
                     </label>
                     <input
                       type="text"
@@ -1188,28 +1188,34 @@ export default function IdentityReconstructionLanding() {
 
                   <div>
                     <label style={{ fontSize: "0.8rem", color: "#94a3b8", display: "block", marginBottom: "6px" }}>
-                      Simulated Deepfake Anomaly Score [0.0 = Real, 1.0 = Fake]
+                      Verification Flow Mode
                     </label>
-                    <input
-                      type="number"
-                      step="0.05"
-                      min="0.0"
-                      max="1.0"
-                      value={demoScore}
-                      onChange={(e) => setDemoScore(e.target.value)}
-                      style={{
-                        width: "100%",
-                        padding: "0.75rem 1rem",
-                        background: "rgba(255, 255, 255, 0.05)",
-                        border: "1px solid rgba(255, 255, 255, 0.1)",
-                        borderRadius: "8px",
-                        color: "#ffffff",
-                        fontSize: "0.95rem",
-                      }}
-                    />
-                    <span style={{ fontSize: "0.7rem", color: "#64748b", marginTop: "4px", display: "block" }}>
-                      &lt;0.40 = Fast Pass | 0.40–0.74 = Stage 3 Agent Escalation | ≥0.75 = Hard Reject
-                    </span>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
+                      {[
+                        { label: "Standard Flow", score: "0.08" },
+                        { label: "Secondary Review", score: "0.55" },
+                        { label: "Unverified Check", score: "0.88" },
+                      ].map((opt) => (
+                        <button
+                          key={opt.label}
+                          type="button"
+                          onClick={() => setDemoScore(opt.score)}
+                          style={{
+                            padding: "8px 6px",
+                            borderRadius: "8px",
+                            fontSize: "0.75rem",
+                            fontWeight: 600,
+                            cursor: "pointer",
+                            background: demoScore === opt.score ? "rgba(168, 85, 247, 0.25)" : "rgba(255, 255, 255, 0.04)",
+                            border: demoScore === opt.score ? "1px solid #a855f7" : "1px solid rgba(255, 255, 255, 0.1)",
+                            color: demoScore === opt.score ? "#c084fc" : "#94a3b8",
+                            transition: "all 0.15s ease",
+                          }}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
                   <button
@@ -1226,7 +1232,7 @@ export default function IdentityReconstructionLanding() {
                       boxShadow: "0 0 20px rgba(124, 58, 237, 0.3)",
                     }}
                   >
-                    Execute Multi-Stage Verification →
+                    Begin Identity Verification →
                   </button>
                 </div>
               )}
@@ -1245,10 +1251,10 @@ export default function IdentityReconstructionLanding() {
                     }}
                   />
                   <div style={{ fontSize: "1rem", fontWeight: 700, color: "#ffffff" }}>
-                    Evaluating Wire Bytes & Biometric Signals...
+                    Verifying Identity & Live Presence...
                   </div>
                   <div style={{ fontSize: "0.8rem", color: "#64748b", marginTop: "4px" }}>
-                    Archiving video before scoring · Sealing cryptographic block
+                    Checking document validity and physiological liveness signals
                   </div>
                 </div>
               )}
@@ -1284,15 +1290,15 @@ export default function IdentityReconstructionLanding() {
                       }`,
                     }}
                   >
-                    {kycStatus === "approved" && "FAST PASS: IDENTITY APPROVED ✓"}
-                    {kycStatus === "borderline" && "BORDERLINE: ESCALATED TO STAGE 3 AGENT ◈"}
-                    {kycStatus === "rejected" && "HARD REJECT: FRAUD BLOCKED ✕"}
+                    {kycStatus === "approved" && "YOU'RE VERIFIED ✓"}
+                    {kycStatus === "borderline" && "WE'RE REVIEWING YOUR APPLICATION ◈"}
+                    {kycStatus === "rejected" && "WE COULDN'T VERIFY YOU ✕"}
                   </div>
 
                   <p style={{ fontSize: "0.9rem", color: "#94a3b8", marginBottom: "1.5rem" }}>
-                    {kycStatus === "approved" && "All physiological, optical, and identity parameters nominal. Verification sealed in audit chain."}
-                    {kycStatus === "borderline" && "Signal anomalies detected. Case routed to autonomous investigation agent for tool execution."}
-                    {kycStatus === "rejected" && "Anomaly threshold exceeded. Transaction immediately hard-rejected."}
+                    {kycStatus === "approved" && "Your identity document and live presence were successfully confirmed."}
+                    {kycStatus === "borderline" && "Your submission is undergoing brief secondary verification. We'll update your status shortly."}
+                    {kycStatus === "rejected" && "We could not confirm your identity. Please ensure you are in a well-lit environment and try again."}
                   </p>
 
                   <button
@@ -1308,7 +1314,7 @@ export default function IdentityReconstructionLanding() {
                       fontWeight: 600,
                     }}
                   >
-                    Test Another Profile
+                    Start New Verification
                   </button>
                 </div>
               )}

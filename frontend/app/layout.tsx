@@ -92,7 +92,7 @@ export default function RootLayout({
                   Identity Reconstruction
                 </span>
                 <span style={{ fontSize: "0.65rem", color: "#64748b", letterSpacing: "0.05em" }}>
-                  AUTONOMOUS CKYC PIPELINE
+                  SECURE IDENTITY PLATFORM
                 </span>
               </div>
             </Link>
@@ -123,7 +123,7 @@ export default function RootLayout({
                     boxShadow: "0 0 8px #10b981",
                   }}
                 />
-                PIPELINE LIVE
+                SYSTEM READY
               </div>
 
               <a
