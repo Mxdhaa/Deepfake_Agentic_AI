@@ -8,6 +8,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from app.api.routes import router
+from app.api.liveness import router as liveness_router
+from app.api.review import router as review_router
+from app.api.identity import router as identity_router
+from app.api.agent import router as agent_router
 from app.utils.logging import get_logger, setup_logging
 from app.core.config import settings
 
@@ -38,14 +42,19 @@ app = FastAPI(
 # ─── CORS ─────────────────────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_origins=settings.get_effective_origins(),
+    allow_origin_regex=settings.VERCEL_PREVIEW_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # ─── Routers ──────────────────────────────────────────────────────────────────
-app.include_router(router, prefix="/api/v1")
+app.include_router(router,          prefix="/api/v1")
+app.include_router(liveness_router, prefix="/api/v1")
+app.include_router(review_router,   prefix="/api/v1")
+app.include_router(identity_router, prefix="/api/v1")
+app.include_router(agent_router,    prefix="/api/v1")
 
 
 @app.get("/health", tags=["Meta"])

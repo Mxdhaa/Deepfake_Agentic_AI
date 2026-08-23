@@ -1,0 +1,42 @@
+# Render Infrastructure-as-Code Configuration
+# Deploy FastAPI ML Backend with Persistent Disk & Docker
+services:
+  - type: web
+    name: deepfake-agentic-ai-backend
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: starter
+    region: oregon
+    healthCheckPath: /health
+    disk:
+      name: clips-storage
+      mountPath: /app/data/storage
+      sizeGB: 10
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: VERCEL_PREVIEW_REGEX
+        value: ^https:\/\/.*\.vercel\.app$
+      - key: REVIEWER_TOKEN
+        generateValue: true
+      - key: STREAM_SIGNING_KEY
+        generateValue: true
+      - key: REVIEW_URL_EXPIRY_SECONDS
+        value: 600
+      - key: STORAGE_BACKEND
+        value: local
+      - key: STORAGE_LOCAL_ROOT
+        value: /app/data/storage
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini
+      - key: MAX_UPLOAD_SIZE_MB
+        value: 50

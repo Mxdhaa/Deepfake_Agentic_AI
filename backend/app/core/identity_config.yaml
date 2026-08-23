@@ -1,0 +1,28 @@
+# ─── Identity Matching Config (Stage 2) ──────────────────────────────────────────
+# Configuration for deterministic face embedding cosine similarity and
+# registry velocity checks (6-hour window).
+#
+# Thresholds strictly mirror _derive_decision() in generate_synthetic_batch.py:
+#   - Cosine Similarity:
+#       FAIL:       cosine_similarity < 0.35
+#       BORDERLINE: 0.35 <= cosine_similarity < 0.60
+#       PASS:       cosine_similarity >= 0.60
+#   - Registry Velocity (6hr):
+#       FAIL:       registry_velocity >= 6
+#       BORDERLINE: 3 <= registry_velocity < 6
+#       PASS:       registry_velocity < 3
+# ─────────────────────────────────────────────────────────────────────────────
+
+config_version: "v1.0-stage2"
+
+thresholds:
+  similarity_pass: 0.60         # cosine_similarity >= 0.60 -> pass tier
+  similarity_fail: 0.35         # cosine_similarity < 0.35 -> fail tier
+  velocity_borderline: 3        # registry_velocity >= 3 -> borderline tier
+  velocity_fail: 6              # registry_velocity >= 6 -> fail tier
+
+embedding:
+  dimension: 512
+  backbone: "resnet50_feature_extractor"
+
+synthetic_data_path: "data/onboarding_batch.json"

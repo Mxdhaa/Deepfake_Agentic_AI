@@ -1,0 +1,29 @@
+# ─── Retention Policy — STUB ──────────────────────────────────────────────────
+# This file declares retention intent only. Deletion automation is NOT
+# implemented. See "Limitations" in docs/limitations.md.
+#
+# When implementing:
+#   - Cloudflare R2: use bucket lifecycle rules (S3-compatible)
+#   - MinIO: use ILM (Information Lifecycle Management) policies
+#   - Legal hold: must be manually overridden per-session; never auto-deleted
+# ─────────────────────────────────────────────────────────────────────────────
+
+retention_years: 7           # regulatory minimum for KYC/AML (PMLA 2002, RBI guidelines)
+legal_hold_default: false    # if true, session is exempt from auto-deletion
+
+deletion_trigger: "NOT_IMPLEMENTED"
+# When implemented, trigger options will be:
+#   - "expiry_date":   delete after retention_years from stored_at
+#   - "manual_review": require explicit reviewer approval before deletion
+#   - "legal_hold":    block deletion entirely if legal_hold flag is set
+
+encryption_at_rest: "NOT_IMPLEMENTED"
+# Future: AES-256 via KMS (AWS KMS / Cloudflare D1 KMS)
+# Key rotation interval: 90 days
+# Per-session DEK (data encryption key) wrapped by a CMK
+
+limitations:
+  - "Deletion automation is not implemented. Manual deletion only."
+  - "Encryption-at-rest key management (KMS) is not implemented."
+  - "Legal hold enforcement is not automated."
+  - "Retention years are declared but not enforced by any lifecycle rule."

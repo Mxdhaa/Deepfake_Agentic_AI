@@ -1,0 +1,60 @@
+# ─── Liveness Anomaly Scoring Configuration ───────────────────────────────────
+# All weights and thresholds for the Stage 1 liveness check live here.
+# NEVER hardcode these values in application code — always read from this file.
+#
+# config_version is embedded in every LivenessResult response so audit logs
+# can trace exactly which config produced each decision.
+# ─────────────────────────────────────────────────────────────────────────────
+
+config_version: "1.0"
+
+# ── Anomaly Score Weights ──────────────────────────────────────────────────────
+# anomaly_score = sum(weight_i * penalty_i)
+# All weights must sum to 1.0
+weights:
+  deepfake_score:   0.50   # frame-level model output (highest weight — primary signal)
+  challenge_match:  0.25   # motion-based liveness challenge (binary: pass/fail)
+  blink_rate:       0.15   # biological blink rate plausibility
+  av_sync:          0.10   # audio-video temporal alignment offset
+
+# ── Decision Thresholds ────────────────────────────────────────────────────────
+thresholds:
+  # Frame-level deepfake score bands (matches fusion classifier)
+  deepfake_fail:        0.75
+  deepfake_borderline:  0.40
+
+  # Challenge-response: min frames with detectable inter-frame motion
+  # to consider the liveness challenge passed
+  motion_min_frames:    3
+
+  # Blink rate: below this (blinks/min) is physiologically implausible for a live human
+  blink_min_bpm:        8.0
+
+  # AV sync offset bands in milliseconds (matches _derive_decision thresholds)
+  av_sync_borderline_ms: 80
+  av_sync_fail_ms:       150
+
+  # Composite anomaly score bands → final decision
+  anomaly_fail:         0.65
+  anomaly_borderline:   0.40
+
+# ── Frame Extraction ──────────────────────────────────────────────────────────
+frame_sampling:
+  max_frames:   16          # subsample long clips; keeps inference fast
+  resize:       [224, 224]  # target size for the deepfake detector
+
+# ── Motion Detection ──────────────────────────────────────────────────────────
+motion:
+  # Minimum mean absolute pixel delta (0–255 scale) between consecutive frames
+  # to count as a "motion frame". Tuned for typical 30fps webcam clips.
+  min_delta_threshold:  4.0
+  # Optical flow magnitude threshold (fallback when frame-delta is insufficient)
+  flow_magnitude_min:   0.8
+
+# ── Penalty Functions ─────────────────────────────────────────────────────────
+# Penalty values fed into the weighted sum are always clamped to [0.0, 1.0].
+#
+# deepfake_score penalty  = deepfake_score   (already [0,1])
+# challenge_match penalty = 0.0 if passed, 1.0 if failed
+# blink penalty           = 0.0 if blink_rate_bpm >= blink_min_bpm, else 1.0
+# av_sync penalty         = clamp(abs(av_sync_ms) / av_sync_fail_ms, 0.0, 1.0)

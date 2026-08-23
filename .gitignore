@@ -10,8 +10,9 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
+!frontend/lib/
 parts/
 sdist/
 var/
@@ -119,6 +120,9 @@ data/raw/
 data/FaceForensics/
 data/DFDC/
 data/celeb-df/
+data/storage/
+data/tmp/
+backend/data/
 *.mp4
 *.avi
 *.mov
