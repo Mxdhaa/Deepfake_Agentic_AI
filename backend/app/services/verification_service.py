@@ -106,6 +106,52 @@ class VerificationService:
         log.info("verification_service.session_created", reference_id=ref_id, ckyc=record.ckyc_number)
         return session
 
+    def create_verified_session(self, record: CkycRecord) -> VerificationSession:
+        """Create or retrieve a fully verified historical session for an already-verified identity."""
+        existing = self.lookup_session_by_ckyc(record.ckyc_number)
+        if existing and existing.status in {"VERIFIED", "ALREADY_VERIFIED"}:
+            return existing
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        ref_id = _generate_reference_id()
+
+        decision_table = DecisionTable(
+            identity_record="MATCH",
+            name="MATCH",
+            dob="MATCH",
+            ckyc_number="MATCH",
+            phone_otp="VERIFIED",
+            document="MATCH",
+            document_face="MATCH",
+            live_face="MATCH",
+            liveness="CONFIRMED",
+            deepfake_analysis="NO_ANOMALY",
+        )
+
+        session = VerificationSession(
+            reference_id=ref_id,
+            ckyc_number=record.ckyc_number,
+            legal_name=record.legal_name,
+            date_of_birth=record.date_of_birth,
+            registered_phone=record.registered_phone,
+            status="ALREADY_VERIFIED",
+            created_at=now_iso,
+            updated_at=now_iso,
+            phone_verified=True,
+            document_match=True,
+            face_match="MATCH",
+            liveness_result="CONFIRMED",
+            deepfake_result="NO_ANOMALY",
+            final_decision="ALREADY_VERIFIED",
+            final_reason="This identity has already completed verification. No further KYC is required.",
+            decision_table=decision_table,
+        )
+
+        self._sessions[ref_id] = session
+        self._save_sessions()
+        log.info("verification_service.verified_session_created", reference_id=ref_id, ckyc=record.ckyc_number)
+        return session
+
     def get_session(self, reference_id: str) -> Optional[VerificationSession]:
         return self._sessions.get(reference_id.strip().upper())
 

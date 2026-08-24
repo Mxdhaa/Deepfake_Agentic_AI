@@ -92,11 +92,9 @@ async def start_verification(payload: StartVerificationRequest) -> Any:
     # CHANGE 1 — Already-verified shortcut
     if matched_record.verification_status == "VERIFIED":
         log.info("verification.start.already_verified", ckyc=ckyc)
-        # Check if existing session exists or generate lightweight reference
-        existing_session = service.lookup_session_by_ckyc(ckyc)
-        ref_id = existing_session.reference_id if existing_session else f"CP-VERIFIED-{ckyc.replace('CKYC-', '')}"
+        verified_session = service.create_verified_session(matched_record)
         return {
-            "referenceId": ref_id,
+            "referenceId": verified_session.reference_id,
             "status": "ALREADY_VERIFIED",
             "message": "This identity has already completed verification. No further KYC is required.",
             "maskedPhone": matched_record.registered_phone[:4] + " ******" + matched_record.registered_phone[-4:],
