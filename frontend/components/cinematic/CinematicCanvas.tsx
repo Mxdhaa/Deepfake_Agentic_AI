@@ -12,6 +12,7 @@ export default function CinematicCanvas({ scrollProgress, velocity }: CinematicC
   const mountRef = useRef<HTMLDivElement>(null);
   const progressRef = useRef(scrollProgress);
   const velocityRef = useRef(velocity);
+  const mouseRef = useRef({ x: 0, y: 0, targetX: 0, targetY: 0 });
 
   useEffect(() => {
     progressRef.current = scrollProgress;
@@ -22,10 +23,11 @@ export default function CinematicCanvas({ scrollProgress, velocity }: CinematicC
     const container = mountRef.current;
     if (!container) return;
 
-    // Check prefers-reduced-motion
-    const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // Check device / performance capability
+    const isMobile = window.innerWidth < 768;
+    const PARTICLE_COUNT = isMobile ? 2200 : 4600;
+    const DOME_CARD_COUNT = isMobile ? 6 : 12;
 
-    // Scene, Camera, Renderer
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x000000);
 
@@ -33,288 +35,314 @@ export default function CinematicCanvas({ scrollProgress, velocity }: CinematicC
     let height = window.innerHeight;
 
     const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
-    camera.position.set(0, 0, 18);
+    camera.position.set(0, 0, 20);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
+    const renderer = new THREE.WebGLRenderer({
+      antialias: !isMobile,
+      alpha: false,
+      powerPreference: "high-performance",
+    });
     renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, isMobile ? 1.5 : 2));
     container.appendChild(renderer.domElement);
 
-    // ── Particle System (3,600 Points) ─────────────────────────────────────────
-    const PARTICLE_COUNT = 3600;
+    // ── 1. Dome Gallery Cylindrical Group (Opening 0.00 – 0.08) ───────────────
+    const domeGroup = new THREE.Group();
+    const domeCards: THREE.LineSegments[] = [];
+    const domeRadius = 9.5;
+
+    for (let i = 0; i < DOME_CARD_COUNT; i++) {
+      const angle = (i / DOME_CARD_COUNT) * Math.PI * 2;
+      const cardGeo = new THREE.EdgesGeometry(new THREE.PlaneGeometry(1.6, 2.2));
+      const isSelected = i === 0;
+      const cardMat = new THREE.LineBasicMaterial({
+        color: isSelected ? 0x3b82f6 : 0x27272a,
+        transparent: true,
+        opacity: isSelected ? 0.9 : 0.35,
+      });
+      const card = new THREE.LineSegments(cardGeo, cardMat);
+      card.position.set(
+        Math.sin(angle) * domeRadius,
+        (Math.random() - 0.5) * 1.5,
+        Math.cos(angle) * domeRadius - 2
+      );
+      card.lookAt(0, card.position.y, -2);
+      domeGroup.add(card);
+      domeCards.push(card);
+    }
+    scene.add(domeGroup);
+
+    // ── 2. Unified 4,600 Particle BufferGeometry ──────────────────────────────
     const geometry = new THREE.BufferGeometry();
 
     const currentPositions = new Float32Array(PARTICLE_COUNT * 3);
-    const targetPositions00 = new Float32Array(PARTICLE_COUNT * 3); // State 00: Dispersed
-    const targetPositions01 = new Float32Array(PARTICLE_COUNT * 3); // State 01/02: Head Silhouette
-    const targetPositions03 = new Float32Array(PARTICLE_COUNT * 3); // State 03: Document Slab
-    const targetPositions05 = new Float32Array(PARTICLE_COUNT * 3); // State 05: Dense Biometrics
-    const colors = new Float32Array(PARTICLE_COUNT * 3);
-    const opacities = new Float32Array(PARTICLE_COUNT);
+    const targetDome = new Float32Array(PARTICLE_COUNT * 3);
+    const targetSignal = new Float32Array(PARTICLE_COUNT * 3);
+    const targetSilhouette = new Float32Array(PARTICLE_COUNT * 3);
+    const targetDocument = new Float32Array(PARTICLE_COUNT * 3);
+    const targetPortal = new Float32Array(PARTICLE_COUNT * 3);
+    const targetLiveness = new Float32Array(PARTICLE_COUNT * 3);
 
-    const colorWhite = new THREE.Color(0xffffff);
+    const colors = new Float32Array(PARTICLE_COUNT * 3);
+    const colorWhite = new THREE.Color(0xf5f5f5);
     const colorBlue = new THREE.Color(0x3b82f6);
     const colorDim = new THREE.Color(0x52525b);
 
-    // 1. Generate Targets
     for (let i = 0; i < PARTICLE_COUNT; i++) {
       const i3 = i * 3;
 
-      // State 00: Dispersed Volume
-      const r0 = 8 + Math.random() * 14;
-      const theta0 = Math.random() * Math.PI * 2;
-      const phi0 = Math.acos(Math.random() * 2 - 1);
-      targetPositions00[i3] = r0 * Math.sin(phi0) * Math.cos(theta0);
-      targetPositions00[i3 + 1] = r0 * Math.sin(phi0) * Math.sin(theta0);
-      targetPositions00[i3 + 2] = r0 * Math.cos(phi0) - 5;
+      // Dome Gallery Points
+      const dAngle = (i / PARTICLE_COUNT) * Math.PI * 2 * 3;
+      const dRad = 8 + (i % 5) * 0.8;
+      targetDome[i3] = Math.sin(dAngle) * dRad;
+      targetDome[i3 + 1] = ((i % 100) / 100 - 0.5) * 8;
+      targetDome[i3 + 2] = Math.cos(dAngle) * dRad - 4;
 
-      // Initial positions start at State 00
-      currentPositions[i3] = targetPositions00[i3];
-      currentPositions[i3 + 1] = targetPositions00[i3 + 1];
-      currentPositions[i3 + 2] = targetPositions00[i3 + 2];
+      // State 00: Volumetric Signal Field
+      const rSig = 9 + Math.random() * 16;
+      const thetaSig = Math.random() * Math.PI * 2;
+      const phiSig = Math.acos(Math.random() * 2 - 1);
+      targetSignal[i3] = rSig * Math.sin(phiSig) * Math.cos(thetaSig);
+      targetSignal[i3 + 1] = rSig * Math.sin(phiSig) * Math.sin(thetaSig);
+      targetSignal[i3 + 2] = rSig * Math.cos(phiSig) - 6;
 
-      // State 01 / 02: Head Silhouette + Shoulders
-      if (i < PARTICLE_COUNT * 0.65) {
-        // Head ellipsoid
+      currentPositions[i3] = targetDome[i3];
+      currentPositions[i3 + 1] = targetDome[i3 + 1];
+      currentPositions[i3 + 2] = targetDome[i3 + 2];
+
+      // State 01: Human Silhouette & Facial Plane
+      if (i < PARTICLE_COUNT * 0.7) {
+        // Head volume & facial topology
         const u = Math.random();
         const v = Math.random();
-        const t = u * 2 * Math.PI;
-        const p = Math.acos(2 * v - 1);
-        const rHead = 2.4 + (Math.sin(t * 3) * 0.1);
-        targetPositions01[i3] = rHead * Math.sin(p) * Math.cos(t) * 0.85;
-        targetPositions01[i3 + 1] = rHead * Math.cos(p) * 1.15 + 0.4;
-        targetPositions01[i3 + 2] = rHead * Math.sin(p) * Math.sin(t) * 0.85;
+        const theta = u * 2 * Math.PI;
+        const phi = Math.acos(2 * v - 1);
+        const rHead = 2.6 + Math.sin(theta * 3) * 0.12;
+        targetSilhouette[i3] = rHead * Math.sin(phi) * Math.cos(theta) * 0.88;
+        targetSilhouette[i3 + 1] = rHead * Math.cos(phi) * 1.18 + 0.5;
+        targetSilhouette[i3 + 2] = rHead * Math.sin(phi) * Math.sin(theta) * 0.88;
       } else {
         // Shoulders / Torso
-        const sx = (Math.random() - 0.5) * 8.5;
-        const sy = -2.5 - Math.random() * 3.5;
-        const sz = (Math.random() - 0.5) * 2.5;
-        targetPositions01[i3] = sx;
-        targetPositions01[i3 + 1] = sy;
-        targetPositions01[i3 + 2] = sz;
+        targetSilhouette[i3] = (Math.random() - 0.5) * 9.0;
+        targetSilhouette[i3 + 1] = -2.6 - Math.random() * 3.8;
+        targetSilhouette[i3 + 2] = (Math.random() - 0.5) * 3.0;
       }
 
-      // State 03: 3D Identity Document Rectangular Slab
-      const gridW = 60;
-      const gridH = 60;
-      const gx = (i % gridW) - gridW / 2;
-      const gy = Math.floor(i / gridW) - gridH / 2;
-      targetPositions03[i3] = (gx / gridW) * 7.5;
-      targetPositions03[i3 + 1] = (gy / gridH) * 5.0;
-      targetPositions03[i3 + 2] = (Math.random() - 0.5) * 0.2;
+      // State 03: Document Evidence Decomposition Cloud (Volumetric sheet)
+      const sheetX = (Math.random() - 0.5) * 7.5;
+      const sheetY = (Math.random() - 0.5) * 5.5;
+      const sheetZ = (Math.random() - 0.5) * 1.5;
+      targetDocument[i3] = sheetX;
+      targetDocument[i3 + 1] = sheetY;
+      targetDocument[i3 + 2] = sheetZ;
 
-      // State 05: Volumetric Biometric Mesh
-      targetPositions05[i3] = targetPositions01[i3] * 1.15 + (Math.random() - 0.5) * 0.15;
-      targetPositions05[i3 + 1] = targetPositions01[i3 + 1] * 1.15;
-      targetPositions05[i3 + 2] = targetPositions01[i3 + 2] * 1.15;
+      // State 04: Vertical Data Portal Columns
+      const colIdx = i % 4;
+      targetPortal[i3] = (colIdx - 1.5) * 2.8 + (Math.random() - 0.5) * 0.6;
+      targetPortal[i3 + 1] = (Math.random() - 0.5) * 12.0;
+      targetPortal[i3 + 2] = (Math.random() - 0.5) * 1.2;
 
-      // Colors: Overwhelmingly white/dim with restrained 12% electric blue points
-      const isBlue = i % 8 === 0;
-      const c = isBlue ? colorBlue : (i % 3 === 0 ? colorDim : colorWhite);
+      // State 05: Liveness Volumetric Scan Mesh
+      targetLiveness[i3] = targetSilhouette[i3] * 1.12 + (Math.random() - 0.5) * 0.15;
+      targetLiveness[i3 + 1] = targetSilhouette[i3 + 1] * 1.12;
+      targetLiveness[i3 + 2] = targetSilhouette[i3 + 2] * 1.12;
+
+      // Palette: 88% white/dim, 12% electric blue
+      const isElectricBlue = i % 7 === 0;
+      const c = isElectricBlue ? colorBlue : (i % 3 === 0 ? colorDim : colorWhite);
       colors[i3] = c.r;
       colors[i3 + 1] = c.g;
       colors[i3 + 2] = c.b;
-
-      opacities[i] = Math.random() * 0.7 + 0.3;
     }
 
     geometry.setAttribute("position", new THREE.BufferAttribute(currentPositions, 3));
     geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
 
-    // Particle Material
-    const material = new THREE.PointsMaterial({
-      size: 0.055,
+    const particleMaterial = new THREE.PointsMaterial({
+      size: isMobile ? 0.065 : 0.052,
       vertexColors: true,
       transparent: true,
-      opacity: 0.85,
+      opacity: 0.88,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
 
-    const pointCloud = new THREE.Points(geometry, material);
-    scene.add(pointCloud);
+    const particleSystem = new THREE.Points(geometry, particleMaterial);
+    scene.add(particleSystem);
 
-    // ── 3D Laser Scanning Beam (Act 03 Document & Act 05 Liveness) ─────────────
-    const scanLineGeo = new THREE.BufferGeometry();
-    const scanLinePos = new Float32Array([ -5, 0, 0,  5, 0, 0 ]);
-    scanLineGeo.setAttribute("position", new THREE.BufferAttribute(scanLinePos, 3));
-    const scanLineMat = new THREE.LineBasicMaterial({
-      color: 0x3b82f6,
-      transparent: true,
-      opacity: 0.0,
-      linewidth: 2,
-    });
-    const scanLine = new THREE.Line(scanLineGeo, scanLineMat);
-    scene.add(scanLine);
-
-    // ── Central Convergence Point (Act 06 / 07) ───────────────────────────────
-    const singlePointGeo = new THREE.SphereGeometry(0.06, 16, 16);
-    const singlePointMat = new THREE.MeshBasicMaterial({
+    // ── 3. Horizontal & Vertical Blue Scanning Lasers ──────────────────────────
+    const scanGeo = new THREE.BufferGeometry();
+    const scanPos = new Float32Array([-5, 0, 0, 5, 0, 0]);
+    scanGeo.setAttribute("position", new THREE.BufferAttribute(scanPos, 3));
+    const scanMat = new THREE.LineBasicMaterial({
       color: 0x3b82f6,
       transparent: true,
       opacity: 0.0,
     });
-    const convergenceCore = new THREE.Mesh(singlePointGeo, singlePointMat);
-    scene.add(convergenceCore);
+    const laserBeam = new THREE.Line(scanGeo, scanMat);
+    scene.add(laserBeam);
 
-    // ── Render & Physics Loop ──────────────────────────────────────────────────
+    // ── 4. Mouse Tracking for Subtle Spatial Disturbance ───────────────────────
+    const handleMouseMove = (e: MouseEvent) => {
+      mouseRef.current.targetX = (e.clientX / window.innerWidth) * 2 - 1;
+      mouseRef.current.targetY = -(e.clientY / window.innerHeight) * 2 + 1;
+    };
+    window.addEventListener("mousemove", handleMouseMove, { passive: true });
+
+    // ── 5. Main Render Loop ────────────────────────────────────────────────────
     let animId: number;
-    let clock = new THREE.Clock();
+    const clock = new THREE.Clock();
 
-    const animate = () => {
-      animId = requestAnimationFrame(animate);
-      const delta = clock.getDelta();
+    const renderFrame = () => {
+      animId = requestAnimationFrame(renderFrame);
       const time = clock.getElapsedTime();
-
-      const p = prefersReducedMotion ? 0.5 : progressRef.current;
+      const p = progressRef.current;
       const v = velocityRef.current;
+
+      // Smooth mouse interpolation
+      mouseRef.current.x += (mouseRef.current.targetX - mouseRef.current.x) * 0.05;
+      mouseRef.current.y += (mouseRef.current.targetY - mouseRef.current.y) * 0.05;
 
       const posAttr = geometry.attributes.position as THREE.BufferAttribute;
       const posArray = posAttr.array as Float32Array;
 
-      // ── Spatial Camera & Particle Choreography Across 8 Master Acts ──────────
-      // Act 00 (0.00 -> 0.10): Wide shot, slow push
-      // Act 01 (0.10 -> 0.22): Medium shot, silhouette emerges
-      // Act 02 (0.22 -> 0.34): Orbiting data connections
-      // Act 03 (0.34 -> 0.47): Macro push into document plane
-      // Act 04 (0.47 -> 0.58): Document layer fracture & push through
-      // Act 05 (0.58 -> 0.74): Close portrait, yaw turn
-      // Act 06 (0.74 -> 0.88): Convergence to singular point
-      // Act 07 (0.88 -> 1.00): Scene dissolves into final product interface
+      // ── A. Dome Gallery Animation (0.00 – 0.08) ─────────────────────────────
+      if (p < 0.08) {
+        domeGroup.visible = true;
+        domeGroup.rotation.y = time * 0.2 + p * 12;
+        const selectedRatio = Math.min(1.0, p / 0.06);
+        domeCards[0].scale.set(1.0 + selectedRatio * 1.2, 1.0 + selectedRatio * 1.2, 1.0);
+        (domeCards[0].material as THREE.LineBasicMaterial).opacity = 0.9 + selectedRatio * 0.1;
+      } else {
+        domeGroup.visible = false;
+      }
 
-      // Camera Positioning
-      if (p < 0.10) {
-        camera.position.z = 22 - p * 40;
-        camera.position.x = 0;
-        camera.position.y = 0;
-      } else if (p < 0.34) {
-        camera.position.z = 18 - (p - 0.10) * 15;
-        camera.position.x = Math.sin(time * 0.2) * 0.3;
-        camera.position.y = 0;
-      } else if (p < 0.47) {
-        // Document: Macro Close-up
-        const docP = (p - 0.34) / 0.13;
-        camera.position.z = 14 - docP * 4;
-        camera.position.x = Math.sin(docP * Math.PI) * 0.8;
+      // ── B. Camera Choreography (Flying INTO Face & Exiting) ──────────────────
+      // 0.00 - 0.08: Dome Gallery Overview
+      // 0.08 - 0.18: Scene 00 The Signal (Z = 20 -> 16)
+      // 0.18 - 0.32: Scene 01 Reconstruction (Z = 16 -> 12)
+      // 0.32 - 0.44: Scene 02 Fly Straight INTO Face (Z = 12 -> 0.5 -> -6 through facial void)
+      // 0.44 - 0.58: Scene 03 Document Evidence Cloud (Z = 8.5)
+      // 0.58 - 0.72: Scene 04 Liveness Portal & Emerging Silhouette (Z = 9.0)
+      // 0.72 - 0.84: Scene 05 Verification Stability (Z = 14.0)
+      // 0.84 - 1.00: How It Works & CTA (Z = 18.0)
+
+      if (p < 0.08) {
+        camera.position.set(0, 0, 20);
+      } else if (p < 0.18) {
+        const sigP = (p - 0.08) / 0.10;
+        camera.position.set(
+          mouseRef.current.x * 0.6,
+          mouseRef.current.y * 0.6,
+          20 - sigP * 4
+        );
+      } else if (p < 0.32) {
+        const recP = (p - 0.18) / 0.14;
+        camera.position.set(
+          mouseRef.current.x * 0.4,
+          mouseRef.current.y * 0.4,
+          16 - recP * 4
+        );
+      } else if (p < 0.44) {
+        // Fly straight through the facial plane!
+        const faceP = (p - 0.32) / 0.12;
+        camera.position.set(0, 0.5 * (1 - faceP), 12 - faceP * 18); // Z moves from 12 -> -6
       } else if (p < 0.58) {
-        // Fracture & push through
-        const fracP = (p - 0.47) / 0.11;
-        camera.position.z = 10 - fracP * 3;
-      } else if (p < 0.74) {
-        // Liveness Close Portrait
-        camera.position.z = 8.5;
-        camera.position.x = 0;
-      } else if (p < 0.88) {
-        // Convergence Wide
-        const convP = (p - 0.74) / 0.14;
-        camera.position.z = 8.5 + convP * 8;
+        // Document Evidence Plane
+        const docP = (p - 0.44) / 0.14;
+        camera.position.set(Math.sin(docP * Math.PI) * 0.5, 0, 8.5);
+      } else if (p < 0.72) {
+        // Liveness Emergence from Portal
+        camera.position.set(0, 0, 9.2);
+      } else if (p < 0.84) {
+        // Verified Stabilized Shot
+        const verP = (p - 0.72) / 0.12;
+        camera.position.set(0, 0, 9.2 + verP * 4.8);
       } else {
-        // Verify Scene fades out
-        camera.position.z = 16.5;
+        camera.position.set(0, 0, 16);
       }
 
-      // PointCloud Rotation (Yaw / Pitch)
-      if (p < 0.34) {
-        pointCloud.rotation.y = time * 0.15 + v * 0.002;
-        pointCloud.rotation.x = Math.sin(time * 0.2) * 0.05;
-        pointCloud.rotation.z = 0;
-      } else if (p < 0.47) {
-        // Document 3D Isometric Tilt
-        const docTilt = (p - 0.34) / 0.13;
-        pointCloud.rotation.y = THREE.MathUtils.lerp(pointCloud.rotation.y, 0.45 - docTilt * 0.2, 0.1);
-        pointCloud.rotation.x = THREE.MathUtils.lerp(pointCloud.rotation.x, -0.3 + docTilt * 0.15, 0.1);
-      } else if (p < 0.58) {
-        pointCloud.rotation.y = THREE.MathUtils.lerp(pointCloud.rotation.y, 0, 0.1);
-        pointCloud.rotation.x = THREE.MathUtils.lerp(pointCloud.rotation.x, 0, 0.1);
-      } else if (p < 0.74) {
-        // Dynamic Head Turn (Front -> Left -> Right -> Front)
-        const liveP = (p - 0.58) / 0.16;
-        const liveYaw = Math.sin(liveP * Math.PI * 2) * 0.55;
-        const livePitch = Math.cos(liveP * Math.PI * 2) * 0.15;
-        pointCloud.rotation.y = THREE.MathUtils.lerp(pointCloud.rotation.y, liveYaw, 0.12);
-        pointCloud.rotation.x = THREE.MathUtils.lerp(pointCloud.rotation.x, livePitch, 0.12);
-      } else if (p < 0.88) {
-        pointCloud.rotation.y += 0.03;
+      // ── C. PointCloud Rotation & Scanning Beam ──────────────────────────────
+      if (p >= 0.18 && p < 0.32) {
+        particleSystem.rotation.y = time * 0.12 + mouseRef.current.x * 0.25;
+        particleSystem.rotation.x = mouseRef.current.y * 0.15;
+      } else if (p >= 0.32 && p < 0.44) {
+        particleSystem.rotation.set(0, 0, 0); // Aligned for flying through
+      } else if (p >= 0.58 && p < 0.72) {
+        // Liveness Head Movement
+        const liveP = (p - 0.58) / 0.14;
+        const yaw = Math.sin(liveP * Math.PI * 2) * 0.45;
+        particleSystem.rotation.y = THREE.MathUtils.lerp(particleSystem.rotation.y, yaw, 0.1);
+        particleSystem.rotation.x = 0;
+
+        // Laser Scan Beam sweeping top to bottom
+        scanMat.opacity = 0.75;
+        laserBeam.position.y = 2.4 - liveP * 4.8;
+        laserBeam.position.z = 1.0;
       } else {
-        pointCloud.rotation.y = 0;
+        particleSystem.rotation.y = THREE.MathUtils.lerp(particleSystem.rotation.y, 0, 0.08);
+        particleSystem.rotation.x = THREE.MathUtils.lerp(particleSystem.rotation.x, 0, 0.08);
+        scanMat.opacity = 0.0;
       }
 
-      // Laser Scan Line behavior
-      if (p >= 0.34 && p < 0.47) {
-        scanLineMat.opacity = 0.8;
-        const docScanP = (p - 0.34) / 0.13;
-        scanLine.position.y = 2.5 - (docScanP * 5.0);
-        scanLine.position.z = 0.2;
-        scanLine.rotation.copy(pointCloud.rotation);
-      } else if (p >= 0.58 && p < 0.74) {
-        scanLineMat.opacity = 0.65;
-        scanLine.position.y = Math.sin(time * 3) * 2.2 + 0.4;
-        scanLine.position.z = 1.0;
-        scanLine.rotation.set(0, 0, 0);
-      } else {
-        scanLineMat.opacity = 0.0;
-      }
-
-      // Convergence Core behavior (Act 06 & 07)
-      if (p >= 0.74 && p < 0.90) {
-        const convP = (p - 0.74) / 0.16;
-        singlePointMat.opacity = Math.min(1.0, convP * 2.5);
-        const scale = 0.5 + Math.sin(time * 6) * 0.15;
-        convergenceCore.scale.set(scale, scale, scale);
-      } else {
-        singlePointMat.opacity = 0.0;
-      }
-
-      // Particle Position Interpolation
-      const ease = 0.075;
+      // ── D. Continuous Particle Position Interpolation ────────────────────────
+      const ease = 0.08;
       for (let i = 0; i < PARTICLE_COUNT; i++) {
         const i3 = i * 3;
         let tx = 0;
         let ty = 0;
         let tz = 0;
 
-        if (p < 0.10) {
-          // Act 00: Dispersed
-          tx = targetPositions00[i3];
-          ty = targetPositions00[i3 + 1];
-          tz = targetPositions00[i3 + 2];
-        } else if (p < 0.34) {
-          // Act 01 & 02: Head Silhouette
-          const blend = Math.min(1.0, (p - 0.10) / 0.12);
-          tx = THREE.MathUtils.lerp(targetPositions00[i3], targetPositions01[i3], blend);
-          ty = THREE.MathUtils.lerp(targetPositions00[i3 + 1], targetPositions01[i3 + 1], blend);
-          tz = THREE.MathUtils.lerp(targetPositions00[i3 + 2], targetPositions01[i3 + 2], blend);
-        } else if (p < 0.47) {
-          // Act 03: Document
-          const blend = Math.min(1.0, (p - 0.34) / 0.08);
-          tx = THREE.MathUtils.lerp(targetPositions01[i3], targetPositions03[i3], blend);
-          ty = THREE.MathUtils.lerp(targetPositions01[i3 + 1], targetPositions03[i3 + 1], blend);
-          tz = THREE.MathUtils.lerp(targetPositions01[i3 + 2], targetPositions03[i3 + 2], blend);
+        if (p < 0.08) {
+          // Dome Gallery points
+          tx = targetDome[i3];
+          ty = targetDome[i3 + 1];
+          tz = targetDome[i3 + 2];
+        } else if (p < 0.18) {
+          // Scene 00: Volumetric Signal Field + subtle cursor displacement
+          const dist = Math.hypot(
+            targetSignal[i3] - mouseRef.current.x * 4,
+            targetSignal[i3 + 1] - mouseRef.current.y * 4
+          );
+          const push = Math.max(0, 1.5 - dist * 0.4);
+          tx = targetSignal[i3] + push * mouseRef.current.x;
+          ty = targetSignal[i3 + 1] + push * mouseRef.current.y;
+          tz = targetSignal[i3 + 2];
+        } else if (p < 0.32) {
+          // Scene 01: Progressive 7-stage Human Reconstruction
+          const blend = Math.min(1.0, (p - 0.18) / 0.12);
+          tx = THREE.MathUtils.lerp(targetSignal[i3], targetSilhouette[i3], blend);
+          ty = THREE.MathUtils.lerp(targetSignal[i3 + 1], targetSilhouette[i3 + 1], blend);
+          tz = THREE.MathUtils.lerp(targetSignal[i3 + 2], targetSilhouette[i3 + 2], blend);
+        } else if (p < 0.44) {
+          // Scene 02: Silhouette expands as camera enters through face
+          const enterP = (p - 0.32) / 0.12;
+          const expansion = 1.0 + enterP * 1.5;
+          tx = targetSilhouette[i3] * expansion;
+          ty = targetSilhouette[i3 + 1] * expansion;
+          tz = targetSilhouette[i3 + 2];
         } else if (p < 0.58) {
-          // Act 04: Layer Fracture
-          const frac = (p - 0.47) / 0.11;
-          const layerOffset = (i % 4) * 0.6 * frac;
-          tx = targetPositions03[i3] * (1.0 + frac * 0.4);
-          ty = targetPositions03[i3 + 1] * (1.0 + frac * 0.4);
-          tz = targetPositions03[i3 + 2] + layerOffset;
-        } else if (p < 0.74) {
-          // Act 05: Biometric Mesh
+          // Scene 03: Document Evidence Decomposition
+          const blend = Math.min(1.0, (p - 0.44) / 0.08);
+          tx = THREE.MathUtils.lerp(targetSilhouette[i3], targetDocument[i3], blend);
+          ty = THREE.MathUtils.lerp(targetSilhouette[i3 + 1], targetDocument[i3 + 1], blend);
+          tz = THREE.MathUtils.lerp(targetSilhouette[i3 + 2], targetDocument[i3 + 2], blend);
+        } else if (p < 0.72) {
+          // Scene 04: Liveness Portal -> Emerging Silhouette
           const blend = Math.min(1.0, (p - 0.58) / 0.08);
-          tx = THREE.MathUtils.lerp(targetPositions03[i3], targetPositions05[i3], blend);
-          ty = THREE.MathUtils.lerp(targetPositions03[i3 + 1], targetPositions05[i3 + 1], blend);
-          tz = THREE.MathUtils.lerp(targetPositions03[i3 + 2], targetPositions05[i3 + 2], blend);
-        } else if (p < 0.88) {
-          // Act 06: Convergence into Center Point
-          const conv = (p - 0.74) / 0.14;
-          const radius = (1.0 - conv) * 3.5;
-          tx = Math.sin(i * 0.3 + time * 2) * radius;
-          ty = Math.cos(i * 0.3 + time * 2) * radius;
-          tz = Math.sin(i * 0.5 + time * 2) * radius;
+          tx = THREE.MathUtils.lerp(targetPortal[i3], targetLiveness[i3], blend);
+          ty = THREE.MathUtils.lerp(targetPortal[i3 + 1], targetLiveness[i3 + 1], blend);
+          tz = THREE.MathUtils.lerp(targetPortal[i3 + 2], targetLiveness[i3 + 2], blend);
+        } else if (p < 0.84) {
+          // Scene 05: Verification Stability
+          tx = targetLiveness[i3];
+          ty = targetLiveness[i3 + 1];
+          tz = targetLiveness[i3 + 2];
         } else {
-          // Act 07: Vanish / Disperse gently in background
-          tx = targetPositions00[i3] * 1.5;
-          ty = targetPositions00[i3 + 1] * 1.5;
-          tz = targetPositions00[i3 + 2] * 1.5;
+          // Scene 06 & 07: Settled background
+          tx = targetSignal[i3] * 1.2;
+          ty = targetSignal[i3 + 1] * 1.2;
+          tz = targetSignal[i3 + 2] * 1.2;
         }
 
         posArray[i3] += (tx - posArray[i3]) * ease;
@@ -324,17 +352,17 @@ export default function CinematicCanvas({ scrollProgress, velocity }: CinematicC
 
       posAttr.needsUpdate = true;
 
-      // Global particle opacity fadeout on final CTA act
-      if (p >= 0.88) {
-        material.opacity = Math.max(0.08, 1.0 - (p - 0.88) / 0.12);
+      // Opacity fade on final sections
+      if (p >= 0.84) {
+        particleMaterial.opacity = Math.max(0.12, 0.88 - (p - 0.84) * 4);
       } else {
-        material.opacity = 0.85;
+        particleMaterial.opacity = 0.88;
       }
 
       renderer.render(scene, camera);
     };
 
-    animate();
+    renderFrame();
 
     const handleResize = () => {
       width = window.innerWidth;
@@ -348,10 +376,11 @@ export default function CinematicCanvas({ scrollProgress, velocity }: CinematicC
 
     return () => {
       cancelAnimationFrame(animId);
+      window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("resize", handleResize);
       renderer.dispose();
       geometry.dispose();
-      material.dispose();
+      particleMaterial.dispose();
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
       }

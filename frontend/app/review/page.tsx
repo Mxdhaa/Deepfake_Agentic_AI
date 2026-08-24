@@ -263,27 +263,29 @@ export default function ReviewPage() {
           <div style={{ textAlign: "center" }}>
             <div
               style={{
-                display: "inline-block",
-                padding: "6px 14px",
-                borderRadius: "20px",
-                background: "rgba(168, 85, 247, 0.15)",
-                border: "1px solid var(--accent)",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "4px 12px",
+                borderRadius: "4px",
+                background: "rgba(59, 130, 246, 0.08)",
+                border: "1px solid rgba(59, 130, 246, 0.3)",
                 fontSize: "0.75rem",
-                fontWeight: 700,
-                color: "var(--accent-2)",
+                fontFamily: "var(--font-mono)",
+                fontWeight: 600,
+                color: "#3B82F6",
                 marginBottom: "1rem",
               }}
             >
-              🛡️ STAGE 4 ADJUDICATION GATEWAY
+              STAGE 4 ADJUDICATION GATEWAY
             </div>
             <h1
+              className="font-serif"
               style={{
                 fontSize: "1.8rem",
-                fontWeight: 800,
-                background: "linear-gradient(135deg, #f1f5f9 0%, #a855f7 50%, #06b6d4 100%)",
-                WebkitBackgroundClip: "text",
-                WebkitTextFillColor: "transparent",
-                backgroundClip: "text",
+                fontWeight: 500,
+                color: "#FFFFFF",
+                letterSpacing: "-0.02em",
               }}
             >
               Reviewer Authentication
@@ -400,31 +402,59 @@ export default function ReviewPage() {
         position: "relative",
         zIndex: 1,
         minHeight: "100vh",
-        padding: "2rem",
-        maxWidth: "1300px",
+        padding: "2rem 2.5rem",
+        maxWidth: "1400px",
         margin: "0 auto",
         display: "flex",
         flexDirection: "column",
         gap: "1.5rem",
       }}
     >
+      {/* Dedicated Reviewer Application Shell Top Bar */}
+      <header
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          borderBottom: "1px solid var(--border-color)",
+          paddingBottom: "1.25rem",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <span style={{ fontSize: "0.95rem", fontWeight: 700, color: "#FFFFFF", letterSpacing: "0.05em" }}>
+            CHAINPROOF
+          </span>
+          <span style={{ color: "var(--text-dim)" }}>/</span>
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.75rem", color: "#3B82F6", letterSpacing: "0.08em" }}>
+            REVIEWER CONSOLE
+          </span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.78rem", color: "var(--text-muted)" }}>
+            {reviewerName}
+          </span>
+          <button onClick={handleLogout} className="btn-secondary" style={{ padding: "4px 12px", fontSize: "0.75rem" }}>
+            Logout
+          </button>
+        </div>
+      </header>
+
       {/* Header & Session Bar */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "1rem" }}>
         <div>
           <h1
+            className="font-serif"
             style={{
-              fontSize: "2.2rem",
-              fontWeight: 800,
-              background: "linear-gradient(135deg, #f1f5f9 0%, #a855f7 50%, #06b6d4 100%)",
-              WebkitBackgroundClip: "text",
-              WebkitTextFillColor: "transparent",
-              backgroundClip: "text",
+              fontSize: "2rem",
+              fontWeight: 500,
+              color: "#FFFFFF",
+              letterSpacing: "-0.02em",
             }}
           >
             Human Review &amp; Audit Chain
           </h1>
-          <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", marginTop: "4px" }}>
-            Stage 4 Human Escalation Queue · Cryptographic SHA-256 Hash Chain · Tamper Evidence
+          <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginTop: "4px", fontFamily: "var(--font-mono)" }}>
+            Stage 4 Escalation Queue · Cryptographic SHA-256 Hash Chain · Tamper Evidence
           </p>
         </div>
 

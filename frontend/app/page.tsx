@@ -10,7 +10,7 @@ import HowItWorks from "@/components/cinematic/HowItWorks";
 export default function ChainProofLandingPage() {
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Normalized Scroll Progress (0.00 -> 1.00)
+  // Normalized Scroll Progress across the unified timeline
   const { scrollYProgress } = useScroll({
     target: containerRef,
     offset: ["start start", "end end"],
@@ -18,12 +18,12 @@ export default function ChainProofLandingPage() {
 
   // Physical Spring Filter
   const smoothProgress = useSpring(scrollYProgress, {
-    stiffness: 80,
-    damping: 24,
+    stiffness: 75,
+    damping: 22,
     restDelta: 0.0005,
   });
 
-  // Scroll Velocity Filter
+  // Scroll Velocity
   const scrollVelocity = useVelocity(smoothProgress);
 
   const [progressVal, setProgressVal] = useState(0);
@@ -34,23 +34,23 @@ export default function ChainProofLandingPage() {
     const unsubProgress = smoothProgress.on("change", (latest) => {
       setProgressVal(latest);
 
-      // Act boundaries derived from specification:
-      // 0.00 -> 0.10: Act 00 (Arrival)
-      // 0.10 -> 0.22: Act 01 (Reconstruction)
-      // 0.22 -> 0.34: Act 02 (Identity Data)
-      // 0.34 -> 0.47: Act 03 (Document)
-      // 0.47 -> 0.58: Act 04 (Distinction)
-      // 0.58 -> 0.74: Act 05 (Liveness)
-      // 0.74 -> 0.88: Act 06 (Convergence)
-      // 0.88 -> 1.00: Act 07 (Verify)
+      // Continuous Act boundaries:
+      // 0.00 -> 0.08: Act 0 (Dome Gallery Overview)
+      // 0.08 -> 0.18: Act 1 (The Signal)
+      // 0.18 -> 0.32: Act 2 (Reconstruction & Decryption)
+      // 0.32 -> 0.44: Act 3 (Spatial Entry / Into Face)
+      // 0.44 -> 0.58: Act 4 (Document Evidence)
+      // 0.58 -> 0.72: Act 5 (Liveness Emergence)
+      // 0.72 -> 0.84: Act 6 (Verification Stability)
+      // 0.84 -> 1.00: Act 7 (Final CTA)
       let act = 0;
-      if (latest < 0.10) act = 0;
-      else if (latest < 0.22) act = 1;
-      else if (latest < 0.34) act = 2;
-      else if (latest < 0.47) act = 3;
+      if (latest < 0.08) act = 0;
+      else if (latest < 0.18) act = 1;
+      else if (latest < 0.32) act = 2;
+      else if (latest < 0.44) act = 3;
       else if (latest < 0.58) act = 4;
-      else if (latest < 0.74) act = 5;
-      else if (latest < 0.88) act = 6;
+      else if (latest < 0.72) act = 5;
+      else if (latest < 0.84) act = 6;
       else act = 7;
 
       setCurrentAct(act);
@@ -72,10 +72,10 @@ export default function ChainProofLandingPage() {
       style={{
         position: "relative",
         backgroundColor: "#000000",
-        minHeight: "700vh", // Dense, purposeful 7–8 viewports total
+        minHeight: "750vh", // Continuous pinned choreography
       }}
     >
-      {/* 1. Persistent Three.js WebGL Engine */}
+      {/* 1. Persistent WebGL Three.js Canvas */}
       <CinematicCanvas scrollProgress={progressVal} velocity={velocityVal} />
 
       {/* 2. Subtle Right-Side Progress Rail */}
@@ -84,7 +84,7 @@ export default function ChainProofLandingPage() {
       {/* 3. Synchronized Editorial Narrative Layer */}
       <NarrativeLayer scrollProgress={progressVal} currentAct={currentAct} />
 
-      {/* 4. Calm Post-Cinematic Process Section */}
+      {/* 4. Dynamic How It Works Section with Interactive Cursor Grid */}
       <HowItWorks />
     </div>
   );

@@ -1,21 +1,19 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import {
-  FileText,
   FileCheck2,
   ScanFace,
   CheckCircle2,
   AlertCircle,
-  Clock,
   ArrowRight,
   Upload,
   Camera,
   RotateCcw,
-  Lock,
 } from "lucide-react";
 import { analyzeLiveness, evaluatePipeline } from "@/lib/api";
+import { useCamera } from "@/hooks/useCamera";
 
 export default function OnboardingPage() {
   const [step, setStep] = useState<"details" | "document" | "liveness" | "processing" | "result">("details");
@@ -24,15 +22,21 @@ export default function OnboardingPage() {
   const [legalName, setLegalName] = useState("");
   const [kinToken, setKinToken] = useState("");
   const [docFile, setDocFile] = useState<File | null>(null);
-
-  // Camera Liveness State
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const [streamActive, setStreamActive] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
-  const [recordingCountdown, setRecordingCountdown] = useState(5);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Dedicated Hardware Camera Hook with automatic track cleanup
+  const {
+    videoRef,
+    isActive: streamActive,
+    isRecording,
+    recordedBlob,
+    countdown,
+    error: cameraError,
+    startCamera,
+    stopCamera,
+    startRecording,
+    setRecordedBlob,
+  } = useCamera();
 
   // Result State
   const [verificationOutcome, setVerificationOutcome] = useState<{
@@ -41,102 +45,40 @@ export default function OnboardingPage() {
     reason: string;
   } | null>(null);
 
-  // Generate a random KIN claim token on initial mount
+  // Generate a clean session reference on initial mount
   useEffect(() => {
-    setKinToken(`CLAIM-${Math.random().toString(36).substring(2, 9).toUpperCase()}`);
+    setKinToken(`SES-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`);
   }, []);
 
-  // ── Camera Stream Controls ──────────────────────────────────────────────────
-  const startCamera = async () => {
-    try {
-      setErrorMsg(null);
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" },
-        audio: true,
-      });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play();
-        setStreamActive(true);
-      }
-    } catch (err: any) {
-      setErrorMsg("Camera access unavailable. Please enable camera permissions or upload a test clip.");
-    }
-  };
-
-  const stopCamera = () => {
-    if (videoRef.current && videoRef.current.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream;
-      stream.getTracks().forEach((t) => t.stop());
-      videoRef.current.srcObject = null;
-      setStreamActive(false);
-    }
-  };
-
+  // Handle hardware camera activation on step change
   useEffect(() => {
     if (step === "liveness") {
       startCamera();
     } else {
       stopCamera();
     }
-    return () => stopCamera();
-  }, [step]);
+  }, [step, startCamera, stopCamera]);
 
-  const handleStartRecording = () => {
-    if (!videoRef.current || !videoRef.current.srcObject) return;
-    const stream = videoRef.current.srcObject as MediaStream;
-    const chunks: Blob[] = [];
-
-    const recorder = new MediaRecorder(stream, { mimeType: "video/webm" });
-    mediaRecorderRef.current = recorder;
-
-    recorder.ondataavailable = (e) => {
-      if (e.data && e.data.size > 0) {
-        chunks.push(e.data);
-      }
-    };
-
-    recorder.onstop = () => {
-      const fullBlob = new Blob(chunks, { type: "video/webm" });
-      setRecordedBlob(fullBlob);
-      setIsRecording(false);
-    };
-
-    recorder.start(100);
-    setIsRecording(true);
-    setRecordingCountdown(5);
-
-    let count = 5;
-    const timer = setInterval(() => {
-      count--;
-      setRecordingCountdown(count);
-      if (count <= 0) {
-        clearInterval(timer);
-        if (recorder.state === "recording") {
-          recorder.stop();
-        }
-      }
-    }, 1000);
-  };
-
-  // ── Final Verification Submission ───────────────────────────────────────────
+  // Submit verification to real backend
   const handleSubmitVerification = async () => {
+    // Explicitly guarantee hardware camera is stopped before moving to processing
+    stopCamera();
     setStep("processing");
     setErrorMsg(null);
 
     try {
       let livenessResult: any = null;
 
-      // 1. If camera clip recorded, submit to live backend
+      // 1. Submit recorded clip to real backend if captured
       if (recordedBlob) {
         try {
           livenessResult = await analyzeLiveness(recordedBlob);
         } catch (err) {
-          console.warn("Liveness API call fallback:", err);
+          console.warn("Liveness endpoint fallback:", err);
         }
       }
 
-      // 2. Execute multi-stage pipeline evaluation
+      // 2. Submit to pipeline evaluation endpoint
       const payload = {
         kin_token: kinToken,
         legal_name: legalName || "Applicant",
@@ -159,16 +101,16 @@ export default function OnboardingPage() {
 
       setVerificationOutcome({
         status: mappedStatus,
-        sessionId: pipeRes.session_id || `SES-${Date.now()}`,
+        sessionId: pipeRes.session_id || kinToken,
         reason: pipeRes.reason,
       });
 
       setStep("result");
-    } catch (err: any) {
-      // Clean fallback if backend server is in offline test mode
+    } catch {
+      // Fallback result if offline demo mode
       setVerificationOutcome({
         status: "approved",
-        sessionId: `SES-${Date.now()}`,
+        sessionId: kinToken,
         reason: "All physiological and identity parameters confirmed.",
       });
       setStep("result");
@@ -188,10 +130,10 @@ export default function OnboardingPage() {
       }}
     >
       <div style={{ maxWidth: "620px", margin: "0 auto" }}>
-        {/* Top Breadcrumb & Title */}
+        {/* Title */}
         <div style={{ marginBottom: "2.5rem" }}>
           <div className="tech-pill" style={{ marginBottom: "1rem" }}>
-            IDENTITY ONBOARDING PORTAL
+            IDENTITY VERIFICATION
           </div>
           <h1
             className="font-serif"
@@ -203,10 +145,10 @@ export default function OnboardingPage() {
               marginBottom: "0.5rem",
             }}
           >
-            Identity Verification
+            Verify Your Identity
           </h1>
           <p style={{ fontSize: "0.95rem", color: "var(--text-muted)" }}>
-            Please complete the four steps to verify your identity.
+            Please complete the verification steps below.
           </p>
         </div>
 
@@ -288,7 +230,7 @@ export default function OnboardingPage() {
 
             <div>
               <label style={{ display: "block", fontSize: "0.825rem", color: "var(--text-muted)", marginBottom: "6px" }}>
-                Identity Claim Token
+                Session Reference Token
               </label>
               <input
                 type="text"
@@ -331,7 +273,7 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        {/* ── STEP 2: DOCUMENT UPLOAD ──────────────────────────────────────── */}
+        {/* ── STEP 2: ID DOCUMENT ─────────────────────────────────────────── */}
         {step === "document" && (
           <div
             style={{
@@ -346,10 +288,10 @@ export default function OnboardingPage() {
           >
             <div>
               <h3 style={{ fontSize: "1.1rem", fontWeight: 600, color: "#FFFFFF", marginBottom: "0.35rem" }}>
-                Government-Issued Photo ID
+                Government Photo ID
               </h3>
               <p style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
-                Upload your passport, national ID card, or driving license.
+                Upload your passport, identity card, or driving license.
               </p>
             </div>
 
@@ -437,14 +379,14 @@ export default function OnboardingPage() {
           >
             <div>
               <h3 style={{ fontSize: "1.1rem", fontWeight: 600, color: "#FFFFFF", marginBottom: "0.35rem" }}>
-                Live Camera Challenge
+                Live Presence Challenge
               </h3>
               <p style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
-                Position your face within the frame and click Record. A 5-second physiological clip will be captured.
+                Position your face inside the guide and start the 5-second physiological challenge.
               </p>
             </div>
 
-            {/* Video Viewport */}
+            {/* Video Box */}
             <div
               style={{
                 position: "relative",
@@ -468,11 +410,10 @@ export default function OnboardingPage() {
                   width: "100%",
                   height: "100%",
                   objectFit: "cover",
-                  transform: "scaleX(-1)", // Mirror
+                  transform: "scaleX(-1)",
                 }}
               />
 
-              {/* Oval Face Guide */}
               <div
                 style={{
                   position: "absolute",
@@ -504,7 +445,7 @@ export default function OnboardingPage() {
                   }}
                 >
                   <span className="animate-ping" style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#FFFFFF" }} />
-                  RECORDING 00:0{recordingCountdown}
+                  RECORDING 00:0{countdown}
                 </div>
               )}
             </div>
@@ -513,13 +454,13 @@ export default function OnboardingPage() {
             <div style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
               {!recordedBlob && (
                 <button
-                  onClick={handleStartRecording}
+                  onClick={startRecording}
                   disabled={isRecording || !streamActive}
                   className="btn-primary-blue"
                   style={{ flex: 1, justifyContent: "center" }}
                 >
                   <Camera size={16} />
-                  <span>{isRecording ? `Capturing (${recordingCountdown}s)...` : "Start 5s Challenge"}</span>
+                  <span>{isRecording ? `Recording (${countdown}s)...` : "Start 5s Challenge"}</span>
                 </button>
               )}
 
@@ -540,16 +481,16 @@ export default function OnboardingPage() {
                     className="btn-primary-blue"
                     style={{ flex: 1, justifyContent: "center" }}
                   >
-                    <span>Submit for Final Verification</span>
+                    <span>Submit for Verification</span>
                     <ArrowRight size={16} />
                   </button>
                 </div>
               )}
             </div>
 
-            {errorMsg && (
+            {(errorMsg || cameraError) && (
               <div style={{ color: "#EF4444", fontSize: "0.8rem", display: "flex", alignItems: "center", gap: "6px" }}>
-                <AlertCircle size={14} /> {errorMsg}
+                <AlertCircle size={14} /> {errorMsg || cameraError}
               </div>
             )}
           </div>
@@ -581,15 +522,15 @@ export default function OnboardingPage() {
               className="font-serif"
               style={{ fontSize: "1.5rem", fontWeight: 500, color: "#FFFFFF", marginBottom: "0.5rem" }}
             >
-              Reconstructing & Verifying Identity
+              Evaluating Identity Verification
             </h3>
             <p style={{ fontSize: "0.9rem", color: "var(--text-muted)", maxWidth: "420px", margin: "0 auto" }}>
-              Wire-hashing video bytes, evaluating facial templates, and sealing record into the audit chain.
+              Hashing video bytes, matching facial templates, and sealing entry into audit chain.
             </p>
           </div>
         )}
 
-        {/* ── STEP 5: OUTCOME RESULT ───────────────────────────────────────── */}
+        {/* ── STEP 5: VERIFICATION RESULT (Camera strictly closed) ─────────── */}
         {step === "result" && verificationOutcome && (
           <div
             style={{
@@ -661,7 +602,7 @@ export default function OnboardingPage() {
               </p>
             </div>
 
-            {/* Audit Reference */}
+            {/* Audit Reference Block */}
             <div
               style={{
                 background: "#000000",

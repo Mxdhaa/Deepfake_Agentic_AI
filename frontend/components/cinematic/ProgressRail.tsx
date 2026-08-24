@@ -8,14 +8,14 @@ interface ProgressRailProps {
 }
 
 const ACTS = [
-  { id: 0, num: "00", name: "THE SIGNAL" },
-  { id: 1, num: "01", name: "RECONSTRUCTION" },
-  { id: 2, num: "02", name: "IDENTITY DATA" },
-  { id: 3, num: "03", name: "DOCUMENT" },
-  { id: 4, num: "04", name: "DISTINCTION" },
+  { id: 0, num: "00", name: "DOME GALLERY" },
+  { id: 1, num: "01", name: "THE SIGNAL" },
+  { id: 2, num: "02", name: "RECONSTRUCTION" },
+  { id: 3, num: "03", name: "SPATIAL ENTRY" },
+  { id: 4, num: "04", name: "EVIDENCE" },
   { id: 5, num: "05", name: "LIVENESS" },
-  { id: 6, num: "06", name: "CONVERGENCE" },
-  { id: 7, num: "07", name: "VERIFY" },
+  { id: 6, num: "06", name: "VERIFIED" },
+  { id: 7, num: "07", name: "START" },
 ];
 
 export default function ProgressRail({ currentAct, scrollProgress }: ProgressRailProps) {
@@ -47,7 +47,7 @@ export default function ProgressRail({ currentAct, scrollProgress }: ProgressRai
               userSelect: "none",
             }}
             onClick={() => {
-              const target = (act.id / 7.5) * (document.body.scrollHeight - window.innerHeight);
+              const target = (act.id / 7.0) * (document.body.scrollHeight - window.innerHeight);
               window.scrollTo({ top: target, behavior: "smooth" });
             }}
           >
