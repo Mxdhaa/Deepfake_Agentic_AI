@@ -1,14 +1,18 @@
 @import "tailwindcss";
 
 :root {
-  --bg-primary: #000000;
-  --bg-secondary: #0a0a0a;
+  --bg-primary: #030712;
+  --bg-secondary: #080f24;
+  --bg-surface: #0a1128;
   --text-white: #ffffff;
-  --text-muted: #a1a1aa;
-  --text-dim: #52525b;
-  --accent-blue: #3b82f6;
-  --accent-blue-hover: #2563eb;
-  --border-color: #27272a;
+  --text-bright: #f5f5f5;
+  --text-readable: #c7ced8;
+  --text-dim: #717a8a;
+  --accent-blue: #2f80ff;
+  --accent-blue-hover: #1677ff;
+  --accent-blue-glow: rgba(47, 128, 255, 0.35);
+  --border-color: #1e293b;
+  --border-glow: rgba(47, 128, 255, 0.2);
   --success: #10b981;
   --warning: #f59e0b;
   --danger: #ef4444;
@@ -27,6 +31,10 @@ html,
 body {
   min-height: 100vh;
   background-color: var(--bg-primary);
+  background-image: 
+    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(14, 30, 64, 0.4), transparent 70%),
+    radial-gradient(ellipse 60% 40% at 50% 120%, rgba(8, 15, 36, 0.6), transparent 80%),
+    linear-gradient(180deg, #030712 0%, #050a18 50%, #030712 100%);
   color: var(--text-white);
   font-family: var(--font-sans);
   overflow-x: hidden;
@@ -52,13 +60,27 @@ body {
   font-family: var(--font-mono);
 }
 
+/* Highly Readable Copy Classes */
+.text-body-readable {
+  color: var(--text-readable);
+  font-size: 1.05rem;
+  line-height: 1.65;
+  letter-spacing: -0.01em;
+}
+
+.text-caption-readable {
+  color: var(--text-readable);
+  font-size: 0.925rem;
+  line-height: 1.55;
+}
+
 /* Editorial Minimalist Button */
 .btn-primary-blue {
   background: var(--accent-blue);
   color: #ffffff;
   border: 1px solid var(--accent-blue);
-  border-radius: 6px;
-  padding: 0.75rem 1.75rem;
+  border-radius: 4px;
+  padding: 0.8rem 1.85rem;
   font-size: 0.9rem;
   font-weight: 500;
   font-family: var(--font-sans);
@@ -68,11 +90,13 @@ body {
   align-items: center;
   gap: 8px;
   text-decoration: none;
+  box-shadow: 0 0 20px rgba(47, 128, 255, 0.25);
 }
 
 .btn-primary-blue:hover {
   background: var(--accent-blue-hover);
   border-color: var(--accent-blue-hover);
+  box-shadow: 0 0 30px rgba(47, 128, 255, 0.45);
   transform: translateY(-1px);
 }
 
@@ -81,22 +105,23 @@ body {
 }
 
 .btn-secondary {
-  background: transparent;
-  color: var(--text-muted);
+  background: rgba(15, 23, 42, 0.6);
+  color: var(--text-readable);
   border: 1px solid var(--border-color);
-  border-radius: 6px;
+  border-radius: 4px;
   padding: 0.75rem 1.5rem;
   font-size: 0.9rem;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
   text-decoration: none;
+  backdrop-filter: blur(8px);
 }
 
 .btn-secondary:hover {
   color: var(--text-white);
-  border-color: #52525b;
-  background: rgba(255, 255, 255, 0.03);
+  border-color: var(--accent-blue);
+  background: rgba(47, 128, 255, 0.08);
 }
 
 /* Minimal Discrete Footer Link */
@@ -111,31 +136,32 @@ body {
   gap: 6px;
   padding: 6px 12px;
   border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  background: rgba(255, 255, 255, 0.01);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
   transition: all 0.2s ease;
 }
 
 .footer-reviewer-link:hover {
-  color: var(--text-muted);
-  border-color: var(--border-color);
-  background: rgba(255, 255, 255, 0.03);
+  color: var(--accent-blue);
+  border-color: var(--accent-blue);
+  background: rgba(47, 128, 255, 0.08);
 }
 
 /* Technical Readout Pill */
 .tech-pill {
   font-family: var(--font-mono);
-  font-size: 0.7rem;
-  letter-spacing: 0.08em;
+  font-size: 0.725rem;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--accent-blue);
-  background: rgba(59, 130, 246, 0.08);
-  border: 1px solid rgba(59, 130, 246, 0.25);
-  padding: 3px 10px;
+  background: rgba(47, 128, 255, 0.08);
+  border: 1px solid rgba(47, 128, 255, 0.3);
+  padding: 4px 12px;
   border-radius: 4px;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  box-shadow: 0 0 15px rgba(47, 128, 255, 0.15);
 }
 
 /* Minimal Custom Scrollbar */
@@ -143,12 +169,12 @@ body {
   width: 4px;
 }
 ::-webkit-scrollbar-track {
-  background: #000000;
+  background: #030712;
 }
 ::-webkit-scrollbar-thumb {
-  background: #27272a;
+  background: #1e293b;
   border-radius: 2px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #3f3f46;
+  background: #334155;
 }

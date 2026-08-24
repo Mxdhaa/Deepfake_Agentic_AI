@@ -62,25 +62,28 @@ export default function HowItWorks() {
     window.addEventListener("mousemove", handleMouseMove, { passive: true });
 
     const spacing = 40;
+    let t = 0;
     const renderGrid = () => {
       animId = requestAnimationFrame(renderGrid);
+      t += 0.025;
       ctx.clearRect(0, 0, width, height);
 
-      ctx.strokeStyle = "rgba(39, 39, 42, 0.4)";
+      ctx.strokeStyle = "rgba(47, 128, 255, 0.14)";
       ctx.lineWidth = 1;
 
-      // Draw Grid with local cursor disturbance
+      // Draw Grid with continuous harmonic wave + local cursor disturbance
       for (let x = 0; x < width; x += spacing) {
         ctx.beginPath();
         for (let y = 0; y < height; y += 10) {
+          const ambientWave = Math.sin(t + x * 0.015 + y * 0.012) * 3.5;
           const dx = x - mouseRef.current.x;
           const dy = y - mouseRef.current.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
-          const maxDist = 120;
-          let offsetX = 0;
+          const maxDist = 140;
+          let offsetX = ambientWave;
           if (dist < maxDist) {
-            const force = (1 - dist / maxDist) * 12;
-            offsetX = (dx / dist) * force;
+            const force = (1 - dist / maxDist) * 16;
+            offsetX += (dx / dist) * force;
           }
           if (y === 0) ctx.moveTo(x + offsetX, y);
           else ctx.lineTo(x + offsetX, y);
