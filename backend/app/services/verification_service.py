@@ -173,12 +173,18 @@ class VerificationService:
         return session
 
     def get_session(self, reference_id: str) -> Optional[VerificationSession]:
-        return self._sessions.get(reference_id.strip().upper())
+        clean_id = reference_id.strip().upper()
+        if clean_id in self._sessions:
+            return self._sessions[clean_id]
+        self._initialize()
+        return self._sessions.get(clean_id)
 
     def lookup_session_by_ckyc(self, ckyc_number: str) -> Optional[VerificationSession]:
         clean_ckyc = ckyc_number.strip().upper()
-        # Find latest session for this CKYC
         matching = [s for s in self._sessions.values() if s.ckyc_number == clean_ckyc]
+        if not matching:
+            self._initialize()
+            matching = [s for s in self._sessions.values() if s.ckyc_number == clean_ckyc]
         if not matching:
             return None
         matching.sort(key=lambda x: x.created_at, reverse=True)
