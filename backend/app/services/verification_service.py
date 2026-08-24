@@ -349,6 +349,25 @@ class VerificationService:
         dt = session.decision_table
         now_iso = datetime.now(timezone.utc).isoformat()
 
+        # 0. Enforce Stage Completion Prerequisites (prevent bypassing document/liveness)
+        if session.status != "ALREADY_VERIFIED":
+            incomplete_stages = []
+            if not session.phone_verified or dt.phone_otp != "VERIFIED":
+                incomplete_stages.append("PHONE_OTP")
+            if not session.document_match or dt.document != "MATCH":
+                incomplete_stages.append("DOCUMENT_VERIFICATION")
+            if dt.liveness == "NOT_ATTEMPTED":
+                incomplete_stages.append("LIVENESS_CHALLENGE")
+            if dt.deepfake_analysis == "NOT_ATTEMPTED":
+                incomplete_stages.append("DEEPFAKE_ANALYSIS")
+            if dt.live_face == "NOT_ATTEMPTED":
+                incomplete_stages.append("LIVE_FACE_MATCH")
+
+            if incomplete_stages:
+                raise ValueError(
+                    f"STAGES_INCOMPLETE: Cannot finalize verification. Missing required stages: {', '.join(incomplete_stages)}"
+                )
+
         # Decision Matrix Evaluation
         # 1. Hard Mismatch / Failure
         if (

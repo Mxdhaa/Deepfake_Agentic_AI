@@ -335,4 +335,14 @@ async def finalize_verification(reference_id: str) -> Any:
             "verifiedAt": verified_at,
         }
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail={"error": "SESSION_NOT_FOUND", "message": str(exc)})
+        err_msg = str(exc)
+        if "STAGES_INCOMPLETE" in err_msg:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "STAGES_INCOMPLETE",
+                    "message": err_msg,
+                    "referenceId": reference_id,
+                },
+            )
+        raise HTTPException(status_code=404, detail={"error": "SESSION_NOT_FOUND", "message": err_msg})

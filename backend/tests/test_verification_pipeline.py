@@ -186,10 +186,12 @@ def test_liveness_uncertain_leads_to_under_review():
     client.post(f"/api/v1/verification/{ref_id}/otp/verify", json={"otp": otp_resp.json()["demoOtp"]})
     client.post(f"/api/v1/verification/{ref_id}/document", files={"document": ("id.jpg", b"bytes", "image/jpeg")})
 
-    # Simulate UNCERTAIN liveness
+    # Simulate completed liveness stage with UNCERTAIN result
     service = get_verification_service()
     session = service.get_session(ref_id)
     session.decision_table.liveness = "UNCERTAIN"
+    session.decision_table.deepfake_analysis = "NO_ANOMALY"
+    session.decision_table.live_face = "MATCH"
     service._save_sessions()
 
     # Finalize
@@ -201,9 +203,10 @@ def test_liveness_uncertain_leads_to_under_review():
 
 def test_deepfake_flagged_leads_to_not_verified():
     """Asserts that deepfake anomaly flag results in NOT_VERIFIED."""
+    # Use unverified identity
     resp = client.post(
         "/api/v1/verification/start",
-        json={"legalName": "Aarav Sharma", "dateOfBirth": "1994-05-14", "ckycNumber": "CKYC-10001"},
+        json={"legalName": "Rohan Reddy", "dateOfBirth": "1993-09-30", "ckycNumber": "CKYC-10005"},
     )
     ref_id = resp.json()["referenceId"]
 
@@ -215,7 +218,9 @@ def test_deepfake_flagged_leads_to_not_verified():
     # Simulate deepfake anomaly
     service = get_verification_service()
     session = service.get_session(ref_id)
+    session.decision_table.liveness = "CONFIRMED"
     session.decision_table.deepfake_analysis = "FLAGGED"
+    session.decision_table.live_face = "MATCH"
     service._save_sessions()
 
     # Finalize
@@ -223,3 +228,27 @@ def test_deepfake_flagged_leads_to_not_verified():
     assert fin_resp.status_code == 200
     assert fin_resp.json()["status"] == "NOT_VERIFIED"
     assert fin_resp.json()["finalDecision"] == "NOT_VERIFIED"
+
+
+def test_finalize_early_without_stages_returns_400_incomplete():
+    """Security Test: Asserts that calling /finalize before completing document/liveness returns 400 STAGES_INCOMPLETE."""
+    # Use an unverified record (CKYC-10008)
+    resp = client.post(
+        "/api/v1/verification/start",
+        json={"legalName": "Kavya Chatterjee", "dateOfBirth": "1998-09-03", "ckycNumber": "CKYC-10008"},
+    )
+    ref_id = resp.json()["referenceId"]
+    assert resp.json()["status"] == "IN_PROGRESS"
+
+    # Only verify OTP
+    otp_resp = client.post(f"/api/v1/verification/{ref_id}/otp/send")
+    client.post(f"/api/v1/verification/{ref_id}/otp/verify", json={"otp": otp_resp.json()["demoOtp"]})
+
+    # Attempt to bypass Document & Liveness by directly calling finalize
+    fin_resp = client.post(f"/api/v1/verification/{ref_id}/finalize")
+    assert fin_resp.status_code == 400
+    data = fin_resp.json()
+    assert data["error"] == "STAGES_INCOMPLETE"
+    assert "DOCUMENT_VERIFICATION" in data["message"]
+    assert "LIVENESS_CHALLENGE" in data["message"]
+
