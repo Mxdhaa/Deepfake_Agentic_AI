@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { motion } from "motion/react";
 import Link from "next/link";
 import { Lock, ArrowRight, CheckCircle2 } from "lucide-react";
+import DecryptedText from "@/components/ui/DecryptedText";
 
 interface NarrativeLayerProps {
   scrollProgress: number; // 0.0 -> 1.0
@@ -25,66 +26,32 @@ export default function NarrativeLayer({ scrollProgress, currentAct }: Narrative
     return () => clearInterval(interval);
   }, []);
 
-  // Long, deliberate decrypted text sequence for "IDENTITY"
-  const [decryptedText, setDecryptedText] = useState("IDENTITY");
-
-  useEffect(() => {
-    if (currentAct === 2) {
-      const frames = [
-        "17E#T1T",
-        "I7E#T1T",
-        "IDENT1T",
-        "IÐENT1TY",
-        "1DENTITY",
-        "IÐENTITY",
-        "IDENTITY",
-      ];
-      let i = 0;
-      const interval = setInterval(() => {
-        if (i < frames.length) {
-          setDecryptedText(frames[i]);
-          i++;
-        } else {
-          clearInterval(interval);
-        }
-      }, 160);
-      return () => clearInterval(interval);
-    } else {
-      setDecryptedText("IDENTITY");
-    }
-  }, [currentAct]);
-
   // Dynamic Liveness Telemetry derived from scroll progress during Act 5 (0.58 – 0.72)
   const isLivenessAct = currentAct === 5;
   const liveProgress = Math.max(0, Math.min(1, (scrollProgress - 0.58) / 0.14));
 
   let livenessStatusText = "ANALYZING";
-  let livenessPercentage = "--";
   let presenceText = "DETECTING";
   let motionText = "SAMPLING";
   let scanDepth = "034 mm";
 
   if (liveProgress < 0.25) {
     livenessStatusText = "ANALYZING";
-    livenessPercentage = "18.4%";
     presenceText = "DETECTING";
     motionText = "SAMPLING";
     scanDepth = "041 mm";
   } else if (liveProgress < 0.6) {
     livenessStatusText = "42.8%";
-    livenessPercentage = "42.8%";
     presenceText = "DETECTED";
     motionText = "TRACKING";
     scanDepth = "063 mm";
   } else if (liveProgress < 0.88) {
     livenessStatusText = "76.3%";
-    livenessPercentage = "76.3%";
     presenceText = "DETECTED";
     motionText = "STABLE";
     scanDepth = "087 mm";
   } else {
     livenessStatusText = "98.7%";
-    livenessPercentage = "98.7%";
     presenceText = "CONFIRMED ✓";
     motionText = "STABLE";
     scanDepth = "112 mm";
@@ -118,17 +85,18 @@ export default function NarrativeLayer({ scrollProgress, currentAct }: Narrative
           initial={{ opacity: 0 }}
           animate={{ opacity: currentAct === 0 ? 1 : 0 }}
           transition={{ duration: 0.4 }}
-          style={{ maxWidth: "700px", pointerEvents: "auto" }}
+          style={{ maxWidth: "780px", pointerEvents: "auto" }}
         >
           <div className="tech-pill" style={{ marginBottom: "1.25rem" }}>
             <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: "#2F80FF", boxShadow: "0 0 8px #2F80FF" }} />
-            <span>IDENTITY FIELD</span>
+            <span><strong style={{ color: "#2F80FF" }}>IDENTITY</strong> FIELD</span>
             <span style={{ opacity: 0.5, fontSize: "0.68rem" }}>· {clockTick}</span>
           </div>
+
           <h1
             className="font-serif"
             style={{
-              fontSize: "clamp(2.2rem, 5.5vw, 3.8rem)",
+              fontSize: "clamp(2.4rem, 5.5vw, 4.2rem)",
               fontWeight: 500,
               color: "#FFFFFF",
               letterSpacing: "-0.02em",
@@ -136,11 +104,8 @@ export default function NarrativeLayer({ scrollProgress, currentAct }: Narrative
               marginBottom: "1rem",
             }}
           >
-            Selecting identity signal...
+            <DecryptedText text="Selecting identity signal..." isActive={currentAct === 0} speed={40} />
           </h1>
-          <p className="text-body-readable" style={{ maxWidth: "560px", margin: "0 auto" }}>
-            Scroll to isolate and reconstruct individual presence from the anonymous field.
-          </p>
         </motion.div>
       </section>
 
@@ -163,10 +128,12 @@ export default function NarrativeLayer({ scrollProgress, currentAct }: Narrative
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: currentAct === 1 ? 1 : 0, y: currentAct === 1 ? 0 : -20 }}
           transition={{ duration: 0.4 }}
-          style={{ maxWidth: "680px", pointerEvents: "auto" }}
+          style={{ maxWidth: "720px", pointerEvents: "auto" }}
         >
           <div className="tech-pill" style={{ marginBottom: "1.5rem" }}>
-            IDENTITY FIELD / 00 — THE SIGNAL
+            <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: "#2F80FF", boxShadow: "0 0 8px #2F80FF" }} />
+            <span><strong style={{ color: "#2F80FF" }}>IDENTITY</strong> / 00</span>
+            <span style={{ opacity: 0.5, fontSize: "0.68rem" }}>· {clockTick}</span>
           </div>
 
           <h2
@@ -180,33 +147,12 @@ export default function NarrativeLayer({ scrollProgress, currentAct }: Narrative
               marginBottom: "1.25rem",
             }}
           >
-            Before trust, there is uncertainty.
+            <DecryptedText text="Before trust, there is uncertainty." isActive={currentAct === 1} speed={35} />
           </h2>
 
-          <p
-            className="text-body-readable"
-            style={{
-              maxWidth: "540px",
-              marginBottom: "2.5rem",
-            }}
-          >
-            In a synthetic world, every digital connection begins as an anonymous signal. Scroll to reconstruct presence.
+          <p className="text-body-readable" style={{ maxWidth: "540px" }}>
+            In a synthetic world, every digital connection begins as an anonymous signal.
           </p>
-
-          <div
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "8px",
-              fontFamily: "var(--font-mono)",
-              fontSize: "0.75rem",
-              color: "#94a3b8",
-              letterSpacing: "0.08em",
-            }}
-          >
-            <span>SCROLL TO BEGIN RECONSTRUCTION</span>
-            <span className="animate-bounce" style={{ color: "#2F80FF" }}>↓</span>
-          </div>
         </motion.div>
       </section>
 
@@ -229,10 +175,12 @@ export default function NarrativeLayer({ scrollProgress, currentAct }: Narrative
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: currentAct === 2 ? 1 : 0, y: currentAct === 2 ? 0 : -20 }}
           transition={{ duration: 0.4 }}
-          style={{ maxWidth: "740px", pointerEvents: "auto" }}
+          style={{ maxWidth: "780px", pointerEvents: "auto" }}
         >
           <div className="tech-pill" style={{ marginBottom: "1.5rem" }}>
-            01 — RECONSTRUCTION
+            <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: "#2F80FF", boxShadow: "0 0 8px #2F80FF" }} />
+            <span>01 — RECONSTRUCTION</span>
+            <span style={{ opacity: 0.5, fontSize: "0.68rem" }}>· {clockTick}</span>
           </div>
 
           <h2
@@ -246,23 +194,15 @@ export default function NarrativeLayer({ scrollProgress, currentAct }: Narrative
               marginBottom: "1.25rem",
             }}
           >
-            <span style={{ fontFamily: "var(--font-mono)", color: "#2F80FF" }}>{decryptedText}</span> begins with information.
+            <span style={{ color: "#2F80FF", fontWeight: 700 }}>
+              <DecryptedText text="IDENTITY" isActive={currentAct === 2} speed={30} />
+            </span>{" "}
+            <DecryptedText text="begins with information." isActive={currentAct === 2} speed={35} />
           </h2>
 
-          <p className="text-body-readable" style={{ maxWidth: "540px", marginBottom: "1.75rem" }}>
-            Thousands of isolated point vectors converge across topological stages into the geometric contours of a physical identity.
+          <p className="text-body-readable" style={{ maxWidth: "540px" }}>
+            Thousands of isolated point vectors converge across topological stages into the geometric contours of a physical presence.
           </p>
-
-          <div
-            style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: "0.75rem",
-              color: "#94a3b8",
-              letterSpacing: "0.06em",
-            }}
-          >
-            TOPOLOGY STATUS: <span style={{ color: "#2F80FF", fontWeight: 600 }}>RECONSTRUCTING VOLUMETRIC PRESENCE</span>
-          </div>
         </motion.div>
       </section>
 
@@ -286,10 +226,12 @@ export default function NarrativeLayer({ scrollProgress, currentAct }: Narrative
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: currentAct === 3 ? 1 : 0, scale: currentAct === 3 ? 1 : 0.95 }}
           transition={{ duration: 0.4 }}
-          style={{ maxWidth: "720px", pointerEvents: "auto" }}
+          style={{ maxWidth: "740px", pointerEvents: "auto" }}
         >
           <div className="tech-pill" style={{ marginBottom: "1.25rem" }}>
-            02 — SPATIAL CONVERGENCE
+            <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: "#2F80FF", boxShadow: "0 0 8px #2F80FF" }} />
+            <span>02 — SPATIAL CONVERGENCE</span>
+            <span style={{ opacity: 0.5, fontSize: "0.68rem" }}>· {clockTick}</span>
           </div>
 
           <h2
@@ -302,7 +244,7 @@ export default function NarrativeLayer({ scrollProgress, currentAct }: Narrative
               marginBottom: "1rem",
             }}
           >
-            Entering the identity layer.
+            <DecryptedText text="Entering the identity layer." isActive={currentAct === 3} speed={35} />
           </h2>
 
           <p className="text-body-readable" style={{ maxWidth: "520px", margin: "0 auto" }}>
@@ -330,10 +272,12 @@ export default function NarrativeLayer({ scrollProgress, currentAct }: Narrative
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: currentAct === 4 ? 1 : 0, y: currentAct === 4 ? 0 : -20 }}
           transition={{ duration: 0.4 }}
-          style={{ maxWidth: "640px", pointerEvents: "auto" }}
+          style={{ maxWidth: "660px", pointerEvents: "auto" }}
         >
           <div className="tech-pill" style={{ marginBottom: "1.5rem" }}>
-            03 — EVIDENCE EXTRACTION & WIRE HASHING
+            <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: "#2F80FF", boxShadow: "0 0 8px #2F80FF" }} />
+            <span>03 — EVIDENCE EXTRACTION & WIRE HASHING</span>
+            <span style={{ opacity: 0.5, fontSize: "0.68rem" }}>· {clockTick}</span>
           </div>
 
           <h2
@@ -346,7 +290,7 @@ export default function NarrativeLayer({ scrollProgress, currentAct }: Narrative
               marginBottom: "1.25rem",
             }}
           >
-            Evidence has a physical form.
+            <DecryptedText text="Evidence has a physical form." isActive={currentAct === 4} speed={35} />
           </h2>
 
           <p className="text-body-readable" style={{ marginBottom: "2rem" }}>
@@ -396,7 +340,9 @@ export default function NarrativeLayer({ scrollProgress, currentAct }: Narrative
           style={{ textAlign: "center", maxWidth: "800px", pointerEvents: "auto" }}
         >
           <div className="tech-pill" style={{ marginBottom: "1rem" }}>
-            04 — PHYSIOLOGICAL LIVENESS
+            <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: "#2F80FF", boxShadow: "0 0 8px #2F80FF" }} />
+            <span>04 — PHYSIOLOGICAL LIVENESS</span>
+            <span style={{ opacity: 0.5, fontSize: "0.68rem" }}>· {clockTick}</span>
           </div>
 
           <h2
@@ -409,16 +355,18 @@ export default function NarrativeLayer({ scrollProgress, currentAct }: Narrative
               marginBottom: "1rem",
             }}
           >
-            <span style={{ color: "#FFFFFF", display: "block" }}>A document tells us who you are.</span>
+            <span style={{ color: "#FFFFFF", display: "block" }}>
+              <DecryptedText text="A document tells us who you are." isActive={isLivenessAct} speed={35} />
+            </span>
             <span
               style={{
-                color: liveProgress > 0.85 ? "#2F80FF" : liveProgress > 0.4 ? "#60a5fa" : "#3b82f6aa",
+                color: "#2F80FF",
+                fontWeight: 700,
                 display: "block",
-                transition: "color 0.25s ease",
-                textShadow: liveProgress > 0.85 ? "0 0 25px rgba(47, 128, 255, 0.5)" : "none",
+                textShadow: "0 0 25px rgba(47, 128, 255, 0.4)",
               }}
             >
-              Liveness tells us you&apos;re here.
+              <DecryptedText text="Liveness tells us you're here." isActive={isLivenessAct} speed={35} />
             </span>
           </h2>
 
@@ -517,7 +465,10 @@ export default function NarrativeLayer({ scrollProgress, currentAct }: Narrative
               marginBottom: "0.75rem",
             }}
           >
-            Identity verified.
+            <span style={{ color: "#2F80FF", fontWeight: 700 }}>
+              <DecryptedText text="IDENTITY" isActive={currentAct === 6} speed={30} />
+            </span>{" "}
+            <DecryptedText text="verified." isActive={currentAct === 6} speed={35} />
           </h2>
 
           <p className="text-body-readable" style={{ maxWidth: "560px", margin: "0 auto 2rem" }}>
@@ -574,7 +525,9 @@ export default function NarrativeLayer({ scrollProgress, currentAct }: Narrative
           style={{ maxWidth: "780px", pointerEvents: "auto" }}
         >
           <div className="tech-pill" style={{ marginBottom: "1.5rem" }}>
-            START VERIFICATION
+            <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: "#2F80FF", boxShadow: "0 0 8px #2F80FF" }} />
+            <span>START VERIFICATION</span>
+            <span style={{ opacity: 0.5, fontSize: "0.68rem" }}>· {clockTick}</span>
           </div>
 
           <h2
@@ -588,7 +541,7 @@ export default function NarrativeLayer({ scrollProgress, currentAct }: Narrative
               marginBottom: "1.25rem",
             }}
           >
-            Verify your identity.
+            Verify your <span style={{ color: "#2F80FF", fontWeight: 700 }}><DecryptedText text="identity" isActive={currentAct === 7} speed={30} /></span>.
           </h2>
 
           <p className="text-body-readable" style={{ maxWidth: "560px", margin: "0 auto 2.5rem" }}>
