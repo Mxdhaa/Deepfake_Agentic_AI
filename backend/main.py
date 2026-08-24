@@ -57,6 +57,18 @@ app.include_router(identity_router, prefix="/api/v1")
 app.include_router(agent_router,    prefix="/api/v1")
 
 
+@app.get("/", tags=["Meta"])
+async def root():
+    """Root endpoint for probe verification."""
+    return {
+        "status": "online",
+        "service": "ChainProof Deepfake Agentic AI Backend",
+        "version": "0.1.0",
+        "health": "/health",
+        "docs": "/docs",
+    }
+
+
 @app.get("/health", tags=["Meta"])
 async def health_check():
     """Quick liveness probe for load balancers / Vercel rewrites."""

@@ -241,6 +241,7 @@ export async function verifyAuditChain(
 export async function analyzeLiveness(
   clip: File | Blob,
   challengeType: string = "general_motion",
+  timeoutMs: number = 20000,
 ): Promise<{
   session_id: string;
   deepfake_score: number;
@@ -251,44 +252,63 @@ export async function analyzeLiveness(
   decision: "pass" | "borderline" | "fail" | string;
   video_sha256: string;
 }> {
-  const form = new FormData();
-  form.append("clip", clip, "liveness.mp4");
-  if (challengeType) {
-    form.append("challenge_type", challengeType);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const form = new FormData();
+    form.append("clip", clip, "liveness.mp4");
+    if (challengeType) {
+      form.append("challenge_type", challengeType);
+    }
+    const res = await fetch(`${BASE_URL}/api/v1/liveness/analyze`, {
+      method: "POST",
+      body: form,
+      signal: controller.signal,
+    });
+    return await handleResponse<any>(res);
+  } finally {
+    clearTimeout(timeoutId);
   }
-  const res = await fetch(`${BASE_URL}/api/v1/liveness/analyze`, {
-    method: "POST",
-    body: form,
-  });
-  return handleResponse<any>(res);
 }
 
 /**
  * Execute full multi-stage pipeline evaluation
  */
-export async function evaluatePipeline(payload: {
-  kin_token: string;
-  legal_name: string;
-  device_id: string;
-  webrtc_jitter_ms?: number;
-  cosine_similarity_score?: number;
-  registry_velocity_6hr?: number;
-  challenge_match?: boolean;
-  deepfake_score?: number;
-  blink_rate_bpm?: number;
-  av_sync_ms?: number;
-}): Promise<{
+export async function evaluatePipeline(
+  payload: {
+    kin_token: string;
+    legal_name: string;
+    device_id: string;
+    webrtc_jitter_ms?: number;
+    cosine_similarity_score?: number;
+    registry_velocity_6hr?: number;
+    challenge_match?: boolean;
+    deepfake_score?: number;
+    blink_rate_bpm?: number;
+    av_sync_ms?: number;
+  },
+  timeoutMs: number = 20000,
+): Promise<{
   session_id: string;
   status: "approved" | "rejected" | "escalated_for_review" | string;
   final_decision: "pass" | "borderline" | "fail" | string;
   escalated_to_stage3: boolean;
   reason: string;
 }> {
-  const res = await fetch(`${BASE_URL}/api/v1/agent/evaluate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  return handleResponse<any>(res);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(`${BASE_URL}/api/v1/agent/evaluate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    return await handleResponse<any>(res);
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
