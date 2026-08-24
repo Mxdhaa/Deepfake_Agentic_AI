@@ -19,7 +19,25 @@ from app.utils.logging import get_logger
 
 log = get_logger(__name__)
 
-_REGISTRY_FILE = Path(os.getenv("STORAGE_LOCAL_ROOT", "data/storage")) / "ckyc_registry.json"
+
+def _resolve_storage_file(filename: str) -> Path:
+    env_root = os.getenv("STORAGE_LOCAL_ROOT")
+    if env_root:
+        p = Path(env_root) / filename
+        p.parent.mkdir(parents=True, exist_ok=True)
+        return p
+
+    backend_dir = Path(__file__).resolve().parent.parent.parent
+    root_file = backend_dir.parent / "data" / "storage" / filename
+    if root_file.parent.exists():
+        return root_file
+
+    local_file = backend_dir / "data" / "storage" / filename
+    local_file.parent.mkdir(parents=True, exist_ok=True)
+    return local_file
+
+
+_REGISTRY_FILE = _resolve_storage_file("ckyc_registry.json")
 
 _INDIAN_FIRST_NAMES = [
     "Aarav", "Priya", "Vikram", "Ananya", "Rohan", "Sneha", "Kavya", "Rahul",

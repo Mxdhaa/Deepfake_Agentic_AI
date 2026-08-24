@@ -33,7 +33,25 @@ from app.utils.logging import get_logger
 
 log = get_logger(__name__)
 
-_SESSIONS_FILE = Path(os.getenv("STORAGE_LOCAL_ROOT", "data/storage")) / "verification_sessions.json"
+def _resolve_storage_file(filename: str) -> Path:
+    env_root = os.getenv("STORAGE_LOCAL_ROOT")
+    if env_root:
+        p = Path(env_root) / filename
+        p.parent.mkdir(parents=True, exist_ok=True)
+        return p
+
+    # Check root data/storage vs backend/data/storage
+    backend_dir = Path(__file__).resolve().parent.parent.parent
+    root_file = backend_dir.parent / "data" / "storage" / filename
+    if root_file.parent.exists():
+        return root_file
+
+    local_file = backend_dir / "data" / "storage" / filename
+    local_file.parent.mkdir(parents=True, exist_ok=True)
+    return local_file
+
+
+_SESSIONS_FILE = _resolve_storage_file("verification_sessions.json")
 
 
 def _generate_reference_id() -> str:
