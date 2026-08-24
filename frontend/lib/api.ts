@@ -236,9 +236,12 @@ export async function verifyAuditChain(
 }
 
 /**
- * Submit video clip to /api/v1/liveness/analyze
+ * Submit video clip to /api/v1/liveness/analyze with dynamic challenge validation
  */
-export async function analyzeLiveness(clip: File | Blob): Promise<{
+export async function analyzeLiveness(
+  clip: File | Blob,
+  challengeType: string = "general_motion",
+): Promise<{
   session_id: string;
   deepfake_score: number;
   challenge_match: boolean;
@@ -250,6 +253,9 @@ export async function analyzeLiveness(clip: File | Blob): Promise<{
 }> {
   const form = new FormData();
   form.append("clip", clip, "liveness.mp4");
+  if (challengeType) {
+    form.append("challenge_type", challengeType);
+  }
   const res = await fetch(`${BASE_URL}/api/v1/liveness/analyze`, {
     method: "POST",
     body: form,

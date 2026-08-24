@@ -15,6 +15,19 @@ import {
 import { analyzeLiveness, evaluatePipeline } from "@/lib/api";
 import { useCamera } from "@/hooks/useCamera";
 
+const LIVENESS_CHALLENGES = [
+  { id: "blink_twice", label: "Blink twice slowly", instruction: "Look directly at the camera and blink your eyes twice slowly.", icon: "👁️" },
+  { id: "turn_left", label: "Turn head to the left", instruction: "Slowly turn your head toward the left and return to center.", icon: "⬅️" },
+  { id: "turn_right", label: "Turn head to the right", instruction: "Slowly turn your head toward the right and return to center.", icon: "➡️" },
+  { id: "nod_head", label: "Nod your head up and down", instruction: "Gently nod your head up and down twice.", icon: "↕️" },
+  { id: "tilt_head", label: "Tilt your head sideways", instruction: "Tilt your head slightly toward your shoulder and return.", icon: "🔄" },
+  { id: "smile", label: "Give a natural smile", instruction: "Smile naturally at the camera for a moment.", icon: "😊" },
+  { id: "raise_eyebrows", label: "Raise your eyebrows", instruction: "Raise your eyebrows briefly and relax.", icon: "👀" },
+  { id: "look_up", label: "Look slightly upward", instruction: "Look toward the top of the screen, then back to center.", icon: "⬆️" },
+  { id: "slow_circle", label: "Gentle head roll", instruction: "Make a subtle, slow circular movement with your head.", icon: "🌀" },
+  { id: "turn_and_blink", label: "Turn slightly and blink", instruction: "Turn your head slightly to the side and blink once.", icon: "✨" },
+];
+
 export default function OnboardingPage() {
   const [step, setStep] = useState<"details" | "document" | "liveness" | "processing" | "result">("details");
 
@@ -23,6 +36,14 @@ export default function OnboardingPage() {
   const [kinToken, setKinToken] = useState("");
   const [docFile, setDocFile] = useState<File | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Dynamic 10-Challenge state
+  const [challengeIndex, setChallengeIndex] = useState(0);
+  const currentChallenge = LIVENESS_CHALLENGES[challengeIndex];
+
+  const cycleChallenge = () => {
+    setChallengeIndex((prev) => (prev + 1) % LIVENESS_CHALLENGES.length);
+  };
 
   // Dedicated Hardware Camera Hook with automatic track cleanup
   const {
@@ -50,10 +71,12 @@ export default function OnboardingPage() {
     setKinToken(`SES-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`);
   }, []);
 
-  // Handle hardware camera activation on step change
+  // Handle hardware camera activation & random challenge selection on step change
   useEffect(() => {
     if (step === "liveness") {
       startCamera();
+      const randomIdx = Math.floor(Math.random() * LIVENESS_CHALLENGES.length);
+      setChallengeIndex(randomIdx);
     } else {
       stopCamera();
     }
@@ -69,10 +92,10 @@ export default function OnboardingPage() {
     try {
       let livenessResult: any = null;
 
-      // 1. Submit recorded clip to real backend if captured
+      // 1. Submit recorded clip with expected challenge ID to real backend
       if (recordedBlob) {
         try {
-          livenessResult = await analyzeLiveness(recordedBlob);
+          livenessResult = await analyzeLiveness(recordedBlob, currentChallenge.id);
         } catch (err) {
           console.warn("Liveness endpoint error:", err);
         }
@@ -108,7 +131,11 @@ export default function OnboardingPage() {
       setVerificationOutcome({
         status: mappedStatus,
         sessionId: pipeRes.session_id || kinToken,
-        reason: pipeRes.reason || (mappedStatus === "rejected" ? "Liveness challenge failed: No physiological motion detected." : "Verification processed."),
+        reason:
+          pipeRes.reason ||
+          (!challengePassed
+            ? `Challenge failed: Action "${currentChallenge.label}" was not detected.`
+            : "Verification processed successfully."),
       });
 
       setStep("result");
@@ -388,8 +415,50 @@ export default function OnboardingPage() {
                 Live Presence Challenge
               </h3>
               <p style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
-                Position your face inside the guide and start the 5-second physiological challenge.
+                Position your face inside the guide and perform the required action challenge during the 5-second recording.
               </p>
+            </div>
+
+            {/* Interactive Dynamic Challenge Card */}
+            <div
+              style={{
+                background: "rgba(47, 128, 255, 0.08)",
+                border: "1px solid rgba(47, 128, 255, 0.35)",
+                borderRadius: "6px",
+                padding: "1rem 1.25rem",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                flexWrap: "wrap",
+                gap: "0.75rem",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                <span style={{ fontSize: "1.6rem" }}>{currentChallenge.icon}</span>
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span className="tech-pill" style={{ padding: "2px 8px", fontSize: "0.65rem" }}>
+                      REQUIRED ACTION
+                    </span>
+                    <strong style={{ fontSize: "0.95rem", color: "#FFFFFF" }}>{currentChallenge.label}</strong>
+                  </div>
+                  <p style={{ fontSize: "0.8rem", color: "var(--text-readable)", marginTop: "4px" }}>
+                    {currentChallenge.instruction}
+                  </p>
+                </div>
+              </div>
+
+              {!isRecording && !recordedBlob && (
+                <button
+                  type="button"
+                  onClick={cycleChallenge}
+                  className="btn-secondary"
+                  style={{ padding: "4px 10px", fontSize: "0.75rem" }}
+                  title="Switch to a different challenge"
+                >
+                  Different challenge ↻
+                </button>
+              )}
             </div>
 
             {/* Video Box */}
@@ -425,34 +494,57 @@ export default function OnboardingPage() {
                   position: "absolute",
                   width: "180px",
                   height: "230px",
-                  border: isRecording ? "2px solid #3B82F6" : "2px dashed rgba(255, 255, 255, 0.3)",
+                  border: isRecording ? "2px solid #2F80FF" : "2px dashed rgba(255, 255, 255, 0.3)",
                   borderRadius: "50%",
-                  boxShadow: isRecording ? "0 0 20px rgba(59, 130, 246, 0.3)" : "none",
+                  boxShadow: isRecording ? "0 0 25px rgba(47, 128, 255, 0.4)" : "none",
                   pointerEvents: "none",
                 }}
               />
 
               {isRecording && (
-                <div
-                  style={{
-                    position: "absolute",
-                    top: "1rem",
-                    right: "1rem",
-                    background: "rgba(239, 68, 68, 0.9)",
-                    color: "#FFFFFF",
-                    padding: "4px 10px",
-                    borderRadius: "4px",
-                    fontFamily: "var(--font-mono)",
-                    fontSize: "0.75rem",
-                    fontWeight: 600,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "6px",
-                  }}
-                >
-                  <span className="animate-ping" style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#FFFFFF" }} />
-                  RECORDING 00:0{countdown}
-                </div>
+                <>
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "1rem",
+                      right: "1rem",
+                      background: "rgba(239, 68, 68, 0.9)",
+                      color: "#FFFFFF",
+                      padding: "4px 10px",
+                      borderRadius: "4px",
+                      fontFamily: "var(--font-mono)",
+                      fontSize: "0.75rem",
+                      fontWeight: 600,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                    }}
+                  >
+                    <span className="animate-ping" style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#FFFFFF" }} />
+                    RECORDING 00:0{countdown}
+                  </div>
+
+                  <div
+                    style={{
+                      position: "absolute",
+                      bottom: "1rem",
+                      left: "1.5rem",
+                      right: "1.5rem",
+                      background: "rgba(3, 7, 18, 0.85)",
+                      border: "1px solid #2F80FF",
+                      color: "#FFFFFF",
+                      padding: "6px 12px",
+                      borderRadius: "4px",
+                      fontFamily: "var(--font-mono)",
+                      fontSize: "0.78rem",
+                      textAlign: "center",
+                      backdropFilter: "blur(8px)",
+                      boxShadow: "0 0 15px rgba(47, 128, 255, 0.3)",
+                    }}
+                  >
+                    Action Challenge: <strong style={{ color: "#2F80FF" }}>{currentChallenge.label}</strong>
+                  </div>
+                </>
               )}
             </div>
 

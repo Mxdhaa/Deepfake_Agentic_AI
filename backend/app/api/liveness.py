@@ -15,7 +15,7 @@ import time
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, File, UploadFile, HTTPException, Request
+from fastapi import APIRouter, File, UploadFile, HTTPException, Request, Form
 from pydantic import BaseModel, Field
 
 from app.services.liveness import analyze_liveness, get_config
@@ -100,6 +100,7 @@ class LivenessConfigResponse(BaseModel):
 async def analyze(
     request: Request,
     clip: UploadFile = File(..., description="Video clip from liveness session (mp4/webm/mov)"),
+    challenge_type: Optional[str] = Form(None, description="Expected challenge identifier (e.g. blink_twice, turn_left, nod_head)"),
 ) -> LivenessResult:
     session_id = str(uuid.uuid4())
     t0 = time.perf_counter()
@@ -132,6 +133,7 @@ async def analyze(
         filename=clip.filename,
         size_bytes=len(clip_bytes),
         content_type=ct,
+        challenge_type=challenge_type,
     )
 
     # ── STEP 1: Hash raw bytes immediately — same buffer, before ANY processing ─
@@ -153,6 +155,7 @@ async def analyze(
                 "sha256":   video_sha256,
                 "filename": clip.filename or "clip",
                 "content_type": ct,
+                "challenge_type": challenge_type or "general_motion",
             },
         )
     except Exception as exc:

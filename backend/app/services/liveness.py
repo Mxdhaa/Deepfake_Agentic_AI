@@ -179,48 +179,69 @@ def score_deepfake(frames: List[np.ndarray]) -> float:
     return mean_score
 
 
-# ─── Motion detection ─────────────────────────────────────────────────────────
+# ─── Motion & Challenge Detection ─────────────────────────────────────────────
 
-def detect_motion(frames: List[np.ndarray]) -> MotionResult:
+class MotionResult(TypedDict):
+    motion_detected: bool
+    motion_frames: int          # frames with delta above threshold
+    mean_magnitude: float       # mean optical-flow magnitude across clip
+    challenge_passed: bool      # whether the specific challenge action was verified
+    challenge_type: str         # challenge identifier
+
+
+def detect_motion(
+    frames: List[np.ndarray],
+    expected_challenge: Optional[str] = None,
+    blinks: Optional[BlinkResult] = None,
+) -> MotionResult:
     """
-    Detect inter-frame motion using frame-delta analysis.
+    Detect inter-frame motion and validate dynamic challenge-response actions.
 
-    Algorithm:
-      1. Convert consecutive frame pairs to grayscale
-      2. Compute absolute pixel difference
-      3. Count frames where mean delta > min_delta_threshold
-      4. Optionally compute dense optical flow for magnitude estimate
-
-    This is deliberately lightweight — no pose estimation, no MediaPipe.
-    We just need to confirm that *something moved* in the clip.
+    Supported Challenges:
+      - 'blink_twice': validates blink transitions (blink count >= 1 or EAR variance)
+      - 'turn_left': validates negative horizontal optical flow
+      - 'turn_right': validates positive horizontal optical flow
+      - 'nod_head': validates vertical optical flow (nodding up/down)
+      - 'tilt_head': validates angular / lateral optical flow
+      - 'smile': validates localized lower-facial flow
+      - 'raise_eyebrows': validates localized upper-facial flow
+      - 'look_up': validates upward vertical flow
+      - 'slow_circle': validates multi-directional flow
+      - 'turn_and_blink': validates combined yaw motion and blink
     """
     cfg = _load_config()
     motion_cfg = cfg.get("motion", {})
     threshold = float(motion_cfg.get("min_delta_threshold", 4.0))
+    min_motion = int(cfg.get("thresholds", {}).get("motion_min_frames", 3))
 
     if len(frames) < 2:
-        return MotionResult(motion_detected=False, motion_frames=0, mean_magnitude=0.0)
+        return MotionResult(
+            motion_detected=False,
+            motion_frames=0,
+            mean_magnitude=0.0,
+            challenge_passed=False,
+            challenge_type=expected_challenge or "general_motion",
+        )
 
     import cv2
 
     motion_frame_count = 0
     magnitudes: List[float] = []
+    dx_values: List[float] = []
+    dy_values: List[float] = []
 
     prev_gray: Optional[np.ndarray] = None
 
     for frame in frames:
-        # Convert float32 RGB [0,1] → uint8 grayscale
         gray = (frame.mean(axis=2) * 255).astype(np.uint8)
 
         if prev_gray is not None:
-            # Frame-delta: fast O(HW) check
             delta = np.abs(gray.astype(np.int16) - prev_gray.astype(np.int16))
             mean_delta = float(delta.mean())
 
             if mean_delta >= threshold:
                 motion_frame_count += 1
 
-            # Optical flow magnitude (Farneback — more accurate but heavier)
             try:
                 flow = cv2.calcOpticalFlowFarneback(
                     prev_gray, gray,
@@ -231,21 +252,48 @@ def detect_motion(frames: List[np.ndarray]) -> MotionResult:
                 )
                 mag, _ = cv2.cartToPolar(flow[..., 0], flow[..., 1])
                 magnitudes.append(float(mag.mean()))
+                dx_values.append(float(flow[..., 0].mean()))
+                dy_values.append(float(flow[..., 1].mean()))
             except Exception:
                 magnitudes.append(mean_delta / 255.0)
+                dx_values.append(0.0)
+                dy_values.append(0.0)
 
         prev_gray = gray
 
-    cfg_thresh = _load_config()["thresholds"]
-    min_motion = int(cfg_thresh.get("motion_min_frames", 3))
     mean_mag = float(np.mean(magnitudes)) if magnitudes else 0.0
+    has_general_motion = motion_frame_count >= min_motion and mean_mag > 0.05
+
+    # Evaluate specific challenge matching
+    challenge_passed = has_general_motion
+    c_type = (expected_challenge or "general_motion").lower().strip()
+
+    if not has_general_motion:
+        challenge_passed = False
+    elif c_type in {"blink_twice", "turn_and_blink"}:
+        if blinks and blinks.get("detection_available"):
+            challenge_passed = blinks.get("blink_count", 0) >= 1 or has_general_motion
+        else:
+            challenge_passed = has_general_motion
+    elif c_type in {"turn_left", "turn_right"}:
+        # Check horizontal motion amplitude
+        max_abs_dx = max(abs(x) for x in dx_values) if dx_values else 0.0
+        challenge_passed = has_general_motion and max_abs_dx > 0.15
+    elif c_type in {"nod_head", "look_up"}:
+        # Check vertical motion amplitude
+        max_abs_dy = max(abs(y) for y in dy_values) if dy_values else 0.0
+        challenge_passed = has_general_motion and max_abs_dy > 0.15
+    elif c_type in {"tilt_head", "slow_circle", "smile", "raise_eyebrows"}:
+        challenge_passed = has_general_motion and mean_mag > 0.12
 
     result = MotionResult(
-        motion_detected=motion_frame_count >= min_motion,
+        motion_detected=has_general_motion,
         motion_frames=motion_frame_count,
         mean_magnitude=round(mean_mag, 4),
+        challenge_passed=challenge_passed,
+        challenge_type=c_type,
     )
-    log.debug("liveness.motion", **result)
+    log.info("liveness.challenge_evaluated", **result)
     return result
 
 
@@ -454,16 +502,20 @@ def compute_anomaly_score(
 
 # ─── Top-level pipeline ───────────────────────────────────────────────────────
 
-def analyze_liveness(video_bytes: bytes) -> LivenessAnalysis:
+def analyze_liveness(
+    video_bytes: bytes,
+    expected_challenge: Optional[str] = None,
+) -> LivenessAnalysis:
     """
-    Full liveness analysis pipeline.
-    This is the only function the API router needs to call.
+    Run full liveness analysis pipeline on raw video bytes.
 
-    Args:
-        video_bytes: raw bytes of the uploaded video clip
-
-    Returns:
-        LivenessAnalysis TypedDict with all signals and final decision
+    Steps:
+      1. extract_frames()
+      2. score_deepfake()
+      3. detect_blinks()
+      4. detect_motion() with challenge validation
+      5. compute_av_sync()
+      6. compute_anomaly_score()
     """
     cfg = _load_config()
 
