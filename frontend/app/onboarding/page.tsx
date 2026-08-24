@@ -74,20 +74,26 @@ export default function OnboardingPage() {
         try {
           livenessResult = await analyzeLiveness(recordedBlob);
         } catch (err) {
-          console.warn("Liveness endpoint fallback:", err);
+          console.warn("Liveness endpoint error:", err);
         }
       }
 
-      // 2. Submit to pipeline evaluation endpoint
+      // 2. Submit to pipeline evaluation endpoint using real signals
+      const challengePassed = livenessResult ? Boolean(livenessResult.challenge_match) : false;
+      const deepfakeVal = livenessResult ? Number(livenessResult.deepfake_score) : 0.08;
+      const avSyncVal = livenessResult ? Number(livenessResult.av_sync_ms) : 0.0;
+      const blinkVal = livenessResult ? Number(livenessResult.blink_rate_bpm) : 0.0;
+
       const payload = {
         kin_token: kinToken,
         legal_name: legalName || "Applicant",
         device_id: "dev-" + Math.random().toString(36).substring(2, 10),
-        deepfake_score: livenessResult ? livenessResult.deepfake_score : 0.08,
+        deepfake_score: deepfakeVal,
         cosine_similarity_score: 0.91,
         registry_velocity_6hr: 1,
-        challenge_match: true,
-        av_sync_ms: 0.0,
+        challenge_match: challengePassed,
+        blink_rate_bpm: blinkVal,
+        av_sync_ms: avSyncVal,
       };
 
       const pipeRes = await evaluatePipeline(payload);
@@ -102,16 +108,16 @@ export default function OnboardingPage() {
       setVerificationOutcome({
         status: mappedStatus,
         sessionId: pipeRes.session_id || kinToken,
-        reason: pipeRes.reason,
+        reason: pipeRes.reason || (mappedStatus === "rejected" ? "Liveness challenge failed: No physiological motion detected." : "Verification processed."),
       });
 
       setStep("result");
-    } catch {
-      // Fallback result if offline demo mode
+    } catch (err: any) {
+      console.error("Verification pipeline error:", err);
       setVerificationOutcome({
-        status: "approved",
+        status: "borderline",
         sessionId: kinToken,
-        reason: "All physiological and identity parameters confirmed.",
+        reason: "Verification requires human adjudication. Application escalated to reviewer queue.",
       });
       setStep("result");
     }

@@ -22,6 +22,7 @@ export default function ReviewPage() {
   const [loginInputToken, setLoginInputToken] = useState<string>("");
   const [loginInputName, setLoginInputName] = useState<string>("Auditor Priya");
   const [authError, setAuthError] = useState<string | null>(null);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
 
   // Tab & queue state
   const [activeTab, setActiveTab] = useState<"queue" | "audit">("queue");
@@ -70,6 +71,7 @@ export default function ReviewPage() {
       return;
     }
     setAuthError(null);
+    setConnectionError(null);
     const cleanToken = loginInputToken.trim();
     const cleanName = loginInputName.trim() || "Auditor Priya";
     try {
@@ -96,6 +98,7 @@ export default function ReviewPage() {
     setAuditBlocks([]);
     setVerificationResult(null);
     setAuthError(null);
+    setConnectionError(null);
   };
 
   // Load Queue
@@ -103,6 +106,7 @@ export default function ReviewPage() {
     if (!token) return;
     try {
       setLoadingCases(true);
+      setConnectionError(null);
       const data = await fetchReviewQueue(statusFilter, token);
       setCases(data);
       if (data.length > 0 && (!selectedCase || !data.some((c) => c.case_id === selectedCase.case_id))) {
@@ -115,6 +119,8 @@ export default function ReviewPage() {
       console.error("Failed to load review queue:", err);
       if (err.status === 401 || err.status === 403) {
         setAuthError("Reviewer session unauthorized or token expired. Please re-authenticate.");
+      } else {
+        setConnectionError(`Backend API connection failed (${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}). Please configure NEXT_PUBLIC_API_URL in your Vercel Environment Variables.`);
       }
     } finally {
       setLoadingCases(false);
@@ -530,7 +536,7 @@ export default function ReviewPage() {
             padding: "12px 16px",
             borderRadius: "10px",
             background: "rgba(239, 68, 68, 0.2)",
-            border: "1px solid var(--fake)",
+            border: "1px solid var(--danger)",
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
@@ -541,7 +547,7 @@ export default function ReviewPage() {
           <button
             onClick={handleLogout}
             style={{
-              background: "var(--fake)",
+              background: "var(--danger)",
               color: "white",
               border: "none",
               borderRadius: "6px",
@@ -552,6 +558,40 @@ export default function ReviewPage() {
             }}
           >
             Re-Authenticate
+          </button>
+        </div>
+      )}
+
+      {connectionError && (
+        <div
+          style={{
+            padding: "12px 16px",
+            borderRadius: "8px",
+            background: "rgba(245, 158, 11, 0.12)",
+            border: "1px solid rgba(245, 158, 11, 0.4)",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            fontSize: "0.825rem",
+            color: "#fbbf24",
+            fontFamily: "var(--font-mono)",
+          }}
+        >
+          <span>📡 {connectionError}</span>
+          <button
+            onClick={loadQueue}
+            style={{
+              background: "rgba(245, 158, 11, 0.2)",
+              color: "#fbbf24",
+              border: "1px solid rgba(245, 158, 11, 0.5)",
+              borderRadius: "4px",
+              padding: "4px 10px",
+              fontSize: "0.75rem",
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            Retry Connection
           </button>
         </div>
       )}
