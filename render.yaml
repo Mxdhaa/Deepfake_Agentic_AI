@@ -14,5 +14,3 @@ services:
         value: INFO
       - key: FRONTEND_URL
         value: https://deepfake-agentic-ai.vercel.app
-      - key: ALLOWED_ORIGINS
-        value: https://deepfake-agentic-ai.vercel.app,http://localhost:3000
