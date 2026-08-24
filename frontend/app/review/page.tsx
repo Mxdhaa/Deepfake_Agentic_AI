@@ -811,15 +811,15 @@ export default function ReviewPage() {
                   {/* Metric Grid */}
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginTop: "4px" }}>
                     <div style={{ background: "rgba(255,255,255,0.03)", padding: "8px 12px", borderRadius: "8px", border: "1px solid var(--border)" }}>
-                      <div style={{ color: "var(--text-muted)", fontSize: "0.7rem" }}>Face Cosine Match</div>
+                      <div style={{ color: "var(--text-muted)", fontSize: "0.7rem" }}>Face Template Match</div>
                       <div style={{ fontSize: "1.1rem", fontWeight: 700, color: "var(--accent-2)" }}>
                         {((selectedCase.signals?.cosine_similarity_score || 0) * 100).toFixed(1)}%
                       </div>
                     </div>
                     <div style={{ background: "rgba(255,255,255,0.03)", padding: "8px 12px", borderRadius: "8px", border: "1px solid var(--border)" }}>
-                      <div style={{ color: "var(--text-muted)", fontSize: "0.7rem" }}>6-Hour Velocity</div>
-                      <div style={{ fontSize: "1.1rem", fontWeight: 700, color: (selectedCase.signals?.registry_velocity_6hr || 0) >= 3 ? "var(--uncertain)" : "var(--real)" }}>
-                        {selectedCase.signals?.registry_velocity_6hr || 1} attempts
+                      <div style={{ color: "var(--text-muted)", fontSize: "0.7rem" }}>Duplicate Verification Check</div>
+                      <div style={{ fontSize: "0.95rem", fontWeight: 700, color: (selectedCase.signals?.registry_velocity_6hr || 0) >= 3 ? "var(--uncertain)" : "var(--real)", marginTop: "2px" }}>
+                        {(selectedCase.signals?.registry_velocity_6hr || 1) > 1 ? "Already Verified Record" : "First-Time Verification"}
                       </div>
                     </div>
                     <div style={{ background: "rgba(255,255,255,0.03)", padding: "8px 12px", borderRadius: "8px", border: "1px solid var(--border)" }}>
@@ -829,7 +829,7 @@ export default function ReviewPage() {
                       </div>
                     </div>
                     <div style={{ background: "rgba(255,255,255,0.03)", padding: "8px 12px", borderRadius: "8px", border: "1px solid var(--border)" }}>
-                      <div style={{ color: "var(--text-muted)", fontSize: "0.7rem" }}>WebRTC Network Jitter</div>
+                      <div style={{ color: "var(--text-muted)", fontSize: "0.7rem" }}>Network Jitter</div>
                       <div style={{ fontSize: "1.1rem", fontWeight: 700 }}>
                         {selectedCase.signals?.webrtc_jitter_ms || 0} ms
                       </div>

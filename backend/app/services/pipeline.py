@@ -120,6 +120,7 @@ def evaluate_onboarding_pipeline(
         }
 
     # Step 3 Precedence: Fast Pass Residual (both pass)
+    is_duplicate = (sanitized.registry_velocity_6hr or 1) > 1
     return {
         "session_id": sanitized.session_id,
         "kin_token": sanitized.kin_token,
@@ -130,5 +131,5 @@ def evaluate_onboarding_pipeline(
         "stage3_result": None,
         "status": "approved",
         "final_decision": "pass",
-        "reason": "All physiological, liveness, and identity checks nominal.",
+        "reason": "Already verified - no further verification required." if is_duplicate else "All physiological, liveness, and identity checks nominal.",
     }
