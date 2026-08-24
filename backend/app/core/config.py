@@ -87,6 +87,9 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o-mini"
 
+    # ── Demo / Environment Mode ───────────────────────────────────────────────
+    DEMO_MODE: bool = True
+
     # ── Upload limits ─────────────────────────────────────────────────────────
     MAX_UPLOAD_SIZE_MB: int = 50
 

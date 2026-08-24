@@ -312,3 +312,184 @@ export async function evaluatePipeline(
   }
 }
 
+// ─── Stateful Verification Architecture Contracts (Refactored) ─────────────────
+
+export interface DecisionTable {
+  identity_record: "MATCH" | "NO_MATCH" | "NOT_ATTEMPTED";
+  name: "MATCH" | "NO_MATCH" | "NOT_ATTEMPTED";
+  dob: "MATCH" | "NO_MATCH" | "NOT_ATTEMPTED";
+  ckyc_number: "MATCH" | "NO_MATCH" | "NOT_ATTEMPTED";
+  phone_otp: "VERIFIED" | "FAILED" | "NOT_ATTEMPTED";
+  document: "MATCH" | "NO_MATCH" | "NOT_ATTEMPTED";
+  document_face: "MATCH" | "NO_MATCH" | "NOT_ATTEMPTED";
+  live_face: "MATCH" | "NO_MATCH" | "NOT_ATTEMPTED";
+  liveness: "CONFIRMED" | "UNCERTAIN" | "FAILED" | "NOT_ATTEMPTED";
+  deepfake_analysis: "NO_ANOMALY" | "FLAGGED" | "NOT_ATTEMPTED";
+}
+
+export interface VerificationSessionState {
+  referenceId: string;
+  ckycNumber: string;
+  legalName: string;
+  status: "IN_PROGRESS" | "UNDER_REVIEW" | "VERIFIED" | "NOT_VERIFIED" | "ALREADY_VERIFIED";
+  createdAt: string;
+  updatedAt: string;
+  phoneVerified: boolean;
+  documentMatch: boolean;
+  faceMatch: string;
+  livenessResult: string;
+  deepfakeResult: string;
+  finalDecision?: string | null;
+  finalReason?: string | null;
+  decisionTable: DecisionTable;
+  documentDetails?: any;
+}
+
+/**
+ * 1. Start Verification with CKYC Registry Match & Already-Verified Shortcut
+ */
+export async function startVerification(payload: {
+  legalName: string;
+  dateOfBirth: string;
+  ckycNumber: string;
+}): Promise<{
+  referenceId: string;
+  status: "IN_PROGRESS" | "ALREADY_VERIFIED" | string;
+  message?: string;
+  maskedPhone?: string;
+  stages_completed?: string[];
+}> {
+  const res = await fetch(`${BASE_URL}/api/v1/verification/start`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<any>(res);
+}
+
+/**
+ * 2. Get full state of session by referenceId (used on page refresh/reconstruct)
+ */
+export async function getVerificationStatus(referenceId: string): Promise<VerificationSessionState> {
+  const res = await fetch(`${BASE_URL}/api/v1/verification/${referenceId}/status`, {
+    cache: "no-store",
+  });
+  return handleResponse<VerificationSessionState>(res);
+}
+
+/**
+ * 3. Lookup active session by CKYC Number
+ */
+export async function lookupVerificationByCkyc(ckycNumber: string): Promise<{
+  ckycNumber: string;
+  legalName: string;
+  registryStatus: string;
+  referenceId?: string | null;
+  sessionStatus?: string;
+}> {
+  const res = await fetch(`${BASE_URL}/api/v1/verification/lookup?ckycNumber=${encodeURIComponent(ckycNumber)}`, {
+    cache: "no-store",
+  });
+  return handleResponse<any>(res);
+}
+
+/**
+ * 4. Send Phone OTP
+ */
+export async function sendVerificationOtp(referenceId: string): Promise<{
+  sent: boolean;
+  maskedPhone: string;
+  demoOtp?: string;
+  expiresInSeconds: number;
+}> {
+  const res = await fetch(`${BASE_URL}/api/v1/verification/${referenceId}/otp/send`, {
+    method: "POST",
+  });
+  return handleResponse<any>(res);
+}
+
+/**
+ * 5. Verify Phone OTP
+ */
+export async function verifyVerificationOtp(referenceId: string, otp: string): Promise<{
+  verified: boolean;
+  status: string;
+  remainingAttempts: number;
+  message?: string;
+}> {
+  const res = await fetch(`${BASE_URL}/api/v1/verification/${referenceId}/otp/verify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ otp }),
+  });
+  return handleResponse<any>(res);
+}
+
+/**
+ * 6. Upload ID Document with OCR Cross-Check
+ */
+export async function uploadVerificationDocument(
+  referenceId: string,
+  documentFile: File | Blob,
+): Promise<{
+  referenceId: string;
+  documentMatch: boolean;
+  extractedFields: any;
+  fieldChecks: { name: string; dob: string; ckyc: string };
+  message: string;
+}> {
+  const form = new FormData();
+  form.append("document", documentFile, "id_document.jpg");
+  const res = await fetch(`${BASE_URL}/api/v1/verification/${referenceId}/document`, {
+    method: "POST",
+    body: form,
+  });
+  return handleResponse<any>(res);
+}
+
+/**
+ * 7. Submit Live Camera Capture & 1:1 Face Match
+ */
+export async function submitVerificationLiveness(
+  referenceId: string,
+  clip: File | Blob,
+  challengeType: string = "blink_twice",
+): Promise<{
+  referenceId: string;
+  faceMatch: "MATCH" | "NO_MATCH";
+  faceSimilarityScore: number;
+  livenessResult: "CONFIRMED" | "UNCERTAIN" | "FAILED";
+  deepfakeResult: "NO_ANOMALY" | "FLAGGED";
+  deepfakeScore: number;
+  challengeMatch: boolean;
+  message: string;
+}> {
+  const form = new FormData();
+  form.append("clip", clip, "liveness.mp4");
+  form.append("challenge_type", challengeType);
+  const res = await fetch(`${BASE_URL}/api/v1/verification/${referenceId}/liveness`, {
+    method: "POST",
+    body: form,
+  });
+  return handleResponse<any>(res);
+}
+
+/**
+ * 8. Finalize Verification & Aggregate 10-Signal Decision
+ */
+export async function finalizeVerification(referenceId: string): Promise<{
+  referenceId: string;
+  ckycNumber: string;
+  legalName: string;
+  status: "VERIFIED" | "UNDER_REVIEW" | "NOT_VERIFIED";
+  finalDecision: string;
+  finalReason: string;
+  decisionTable: DecisionTable;
+  verifiedAt?: string;
+}> {
+  const res = await fetch(`${BASE_URL}/api/v1/verification/${referenceId}/finalize`, {
+    method: "POST",
+  });
+  return handleResponse<any>(res);
+}
+

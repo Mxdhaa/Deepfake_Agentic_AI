@@ -12,6 +12,7 @@ from app.api.liveness import router as liveness_router
 from app.api.review import router as review_router
 from app.api.identity import router as identity_router
 from app.api.agent import router as agent_router
+from app.api.verification import router as verification_router
 from app.utils.logging import get_logger, setup_logging
 from app.core.config import settings
 
@@ -50,11 +51,13 @@ app.add_middleware(
 )
 
 # ─── Routers ──────────────────────────────────────────────────────────────────
-app.include_router(router,          prefix="/api/v1")
-app.include_router(liveness_router, prefix="/api/v1")
-app.include_router(review_router,   prefix="/api/v1")
-app.include_router(identity_router, prefix="/api/v1")
-app.include_router(agent_router,    prefix="/api/v1")
+app.include_router(router,              prefix="/api/v1")
+app.include_router(liveness_router,     prefix="/api/v1")
+app.include_router(review_router,       prefix="/api/v1")
+app.include_router(identity_router,     prefix="/api/v1")
+app.include_router(agent_router,        prefix="/api/v1")
+app.include_router(verification_router, prefix="/api/v1")
+app.include_router(verification_router)  # root mount for /verification/start directly
 
 
 @app.get("/", tags=["Meta"])

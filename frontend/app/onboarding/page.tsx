@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import {
   FileCheck2,
@@ -11,8 +11,23 @@ import {
   Upload,
   Camera,
   RotateCcw,
+  ShieldCheck,
+  Smartphone,
+  KeyRound,
+  RefreshCw,
+  ExternalLink,
 } from "lucide-react";
-import { analyzeLiveness, evaluatePipeline } from "@/lib/api";
+import {
+  startVerification,
+  getVerificationStatus,
+  sendVerificationOtp,
+  verifyVerificationOtp,
+  uploadVerificationDocument,
+  submitVerificationLiveness,
+  finalizeVerification,
+  VerificationSessionState,
+  DecisionTable,
+} from "@/lib/api";
 import { useCamera } from "@/hooks/useCamera";
 
 const LIVENESS_CHALLENGES = [
@@ -29,13 +44,23 @@ const LIVENESS_CHALLENGES = [
 ];
 
 export default function OnboardingPage() {
-  const [step, setStep] = useState<"details" | "document" | "liveness" | "processing" | "result">("details");
+  const [step, setStep] = useState<"details" | "otp" | "document" | "liveness" | "processing" | "result">("details");
 
-  // Form State
-  const [legalName, setLegalName] = useState("");
-  const [kinToken, setKinToken] = useState("");
+  // Form State (Seed defaults for test convenience)
+  const [legalName, setLegalName] = useState("Aarav Sharma");
+  const [dateOfBirth, setDateOfBirth] = useState("1994-05-14");
+  const [ckycNumber, setCkycNumber] = useState("CKYC-10001");
+  const [referenceId, setReferenceId] = useState<string>("");
+  const [maskedPhone, setMaskedPhone] = useState<string>("");
+  const [otpInput, setOtpInput] = useState<string>("");
+  const [demoOtp, setDemoOtp] = useState<string | null>(null);
+  const [otpError, setOtpError] = useState<string | null>(null);
+  const [remainingOtpAttempts, setRemainingOtpAttempts] = useState<number>(5);
+
   const [docFile, setDocFile] = useState<File | null>(null);
+  const [documentResult, setDocumentResult] = useState<any>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Dynamic 10-Challenge state
   const [challengeIndex, setChallengeIndex] = useState(0);
@@ -59,19 +84,37 @@ export default function OnboardingPage() {
     setRecordedBlob,
   } = useCamera();
 
-  // Result State
-  const [verificationOutcome, setVerificationOutcome] = useState<{
-    status: "approved" | "borderline" | "rejected";
-    sessionId: string;
-    reason: string;
-  } | null>(null);
+  // Full Server Session State (Restored on mount / refresh)
+  const [sessionState, setSessionState] = useState<VerificationSessionState | null>(null);
 
-  // Generate a clean session reference on initial mount
+  // 1. Reconstruct server state on mount if referenceId exists in sessionStorage
   useEffect(() => {
-    setKinToken(`SES-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`);
+    try {
+      const storedRef = sessionStorage.getItem("cp_reference_id");
+      if (storedRef) {
+        getVerificationStatus(storedRef)
+          .then((state) => {
+            setSessionState(state);
+            setReferenceId(state.referenceId);
+            setLegalName(state.legalName);
+            setCkycNumber(state.ckycNumber);
+
+            if (state.status === "VERIFIED" || state.status === "NOT_VERIFIED" || state.status === "UNDER_REVIEW" || state.status === "ALREADY_VERIFIED") {
+              setStep("result");
+            } else if (!state.phoneVerified) {
+              setStep("otp");
+            } else if (!state.documentMatch) {
+              setStep("document");
+            } else {
+              setStep("liveness");
+            }
+          })
+          .catch((err) => console.warn("Could not restore verification session:", err));
+      }
+    } catch {}
   }, []);
 
-  // Handle hardware camera activation & random challenge selection on step change
+  // Handle hardware camera activation on step change
   useEffect(() => {
     if (step === "liveness") {
       startCamera();
@@ -82,72 +125,173 @@ export default function OnboardingPage() {
     }
   }, [step, startCamera, stopCamera]);
 
-  // Submit verification to real backend
-  const handleSubmitVerification = async () => {
-    // Explicitly guarantee hardware camera is stopped before moving to processing
+  // ── Step 1: Start Verification ──────────────────────────────────────────────
+  const handleStartVerification = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
+    setIsSubmitting(true);
+
+    try {
+      const res = await startVerification({
+        legalName: legalName.trim(),
+        dateOfBirth: dateOfBirth.trim(),
+        ckycNumber: ckycNumber.trim().toUpperCase(),
+      });
+
+      setReferenceId(res.referenceId);
+      sessionStorage.setItem("cp_reference_id", res.referenceId);
+
+      // CHANGE 1: Already-verified shortcut
+      if (res.status === "ALREADY_VERIFIED") {
+        setSessionState({
+          referenceId: res.referenceId,
+          ckycNumber: ckycNumber.trim().toUpperCase(),
+          legalName: legalName.trim(),
+          status: "ALREADY_VERIFIED",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          phoneVerified: true,
+          documentMatch: true,
+          faceMatch: "MATCH",
+          livenessResult: "CONFIRMED",
+          deepfakeResult: "NO_ANOMALY",
+          finalDecision: "ALREADY_VERIFIED",
+          finalReason: "This identity has already completed verification. No further KYC is required.",
+          decisionTable: {
+            identity_record: "MATCH",
+            name: "MATCH",
+            dob: "MATCH",
+            ckyc_number: "MATCH",
+            phone_otp: "VERIFIED",
+            document: "MATCH",
+            document_face: "MATCH",
+            live_face: "MATCH",
+            liveness: "CONFIRMED",
+            deepfake_analysis: "NO_ANOMALY",
+          },
+        });
+        setStep("result");
+        return;
+      }
+
+      // Proceed with IN_PROGRESS flow -> Trigger Phone OTP
+      setMaskedPhone(res.maskedPhone || "+91 ******4821");
+      const otpRes = await sendVerificationOtp(res.referenceId);
+      if (otpRes.demoOtp) {
+        setDemoOtp(otpRes.demoOtp);
+      }
+      setStep("otp");
+    } catch (err: any) {
+      if (err.status === 404 || err.error === "IDENTITY_NOT_FOUND") {
+        setErrorMsg("We couldn't find a matching identity record. Please check your Legal Name, Date of Birth, and CKYC Number.");
+      } else {
+        setErrorMsg(err.message || "Failed to initialize verification session. Please check your backend connection.");
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // ── Step 2: Verify OTP ──────────────────────────────────────────────────────
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!otpInput.trim()) {
+      setOtpError("Please enter the 6-digit OTP code.");
+      return;
+    }
+    setOtpError(null);
+    setIsSubmitting(true);
+
+    try {
+      const res = await verifyVerificationOtp(referenceId, otpInput.trim());
+      if (res.verified) {
+        setStep("document");
+      }
+    } catch (err: any) {
+      setOtpError(err.message || "Invalid OTP code. Please try again.");
+      if (err.remainingAttempts !== undefined) {
+        setRemainingOtpAttempts(err.remainingAttempts);
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    setOtpError(null);
+    try {
+      const res = await sendVerificationOtp(referenceId);
+      if (res.demoOtp) {
+        setDemoOtp(res.demoOtp);
+      }
+    } catch (err: any) {
+      setOtpError("Could not resend OTP. Please try again.");
+    }
+  };
+
+  // ── Step 3: Document Upload & OCR Cross-Check ──────────────────────────────
+  const handleDocumentSubmit = async () => {
+    if (!docFile) {
+      setErrorMsg("Please select an ID document image.");
+      return;
+    }
+    setErrorMsg(null);
+    setIsSubmitting(true);
+
+    try {
+      const res = await uploadVerificationDocument(referenceId, docFile);
+      setDocumentResult(res);
+      setStep("liveness");
+    } catch (err: any) {
+      if (err.error === "IDENTITY_DETAILS_MISMATCH") {
+        setErrorMsg("Document identity details mismatch with CKYC record. Please ensure the document belongs to " + legalName);
+      } else {
+        setErrorMsg(err.message || "Document processing failed. Please try a clearer image.");
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // ── Step 4: Liveness & Finalization ─────────────────────────────────────────
+  const handleSubmitLiveness = async () => {
     stopCamera();
     setStep("processing");
     setErrorMsg(null);
 
     try {
-      let livenessResult: any = null;
-
-      // 1. Submit recorded clip with expected challenge ID to real backend
+      // 1. Submit Liveness recording
       if (recordedBlob) {
-        try {
-          livenessResult = await analyzeLiveness(recordedBlob, currentChallenge.id);
-        } catch (err) {
-          console.warn("Liveness endpoint error:", err);
-        }
+        await submitVerificationLiveness(referenceId, recordedBlob, currentChallenge.id);
       }
 
-      // 2. Submit to pipeline evaluation endpoint using real signals
-      const challengePassed = livenessResult ? Boolean(livenessResult.challenge_match) : false;
-      const deepfakeVal = livenessResult ? Number(livenessResult.deepfake_score) : 0.08;
-      const avSyncVal = livenessResult ? Number(livenessResult.av_sync_ms) : 0.0;
-      const blinkVal = livenessResult ? Number(livenessResult.blink_rate_bpm) : 0.0;
+      // 2. Finalize verification & aggregate 10-signal decision
+      const finalRes = await finalizeVerification(referenceId);
 
-      const payload = {
-        kin_token: kinToken,
-        legal_name: legalName || "Applicant",
-        device_id: "dev-" + Math.random().toString(36).substring(2, 10),
-        deepfake_score: deepfakeVal,
-        cosine_similarity_score: 0.91,
-        registry_velocity_6hr: 1,
-        challenge_match: challengePassed,
-        blink_rate_bpm: blinkVal,
-        av_sync_ms: avSyncVal,
-      };
-
-      const pipeRes = await evaluatePipeline(payload);
-
-      const mappedStatus =
-        pipeRes.final_decision === "pass" || pipeRes.status === "approved"
-          ? "approved"
-          : pipeRes.final_decision === "borderline" || pipeRes.status === "escalated_for_review"
-          ? "borderline"
-          : "rejected";
-
-      setVerificationOutcome({
-        status: mappedStatus,
-        sessionId: pipeRes.session_id || kinToken,
-        reason:
-          pipeRes.reason ||
-          (!challengePassed
-            ? `Challenge failed: Action "${currentChallenge.label}" was not detected.`
-            : "Verification processed successfully."),
-      });
-
+      // 3. Refresh full session state
+      const state = await getVerificationStatus(referenceId);
+      setSessionState(state);
       setStep("result");
     } catch (err: any) {
-      console.error("Verification pipeline error:", err);
-      setVerificationOutcome({
-        status: "borderline",
-        sessionId: kinToken,
-        reason: "Verification requires human adjudication. Application escalated to reviewer queue.",
-      });
+      console.error("Verification error:", err);
+      // Reconstruct state regardless
+      try {
+        const state = await getVerificationStatus(referenceId);
+        setSessionState(state);
+      } catch {}
       setStep("result");
     }
+  };
+
+  const handleRestart = () => {
+    sessionStorage.removeItem("cp_reference_id");
+    setReferenceId("");
+    setSessionState(null);
+    setRecordedBlob(null);
+    setDocFile(null);
+    setOtpInput("");
+    setDemoOtp(null);
+    setStep("details");
   };
 
   return (
@@ -162,73 +306,80 @@ export default function OnboardingPage() {
         paddingRight: "6vw",
       }}
     >
-      <div style={{ maxWidth: "620px", margin: "0 auto" }}>
-        {/* Title */}
+      <div style={{ maxWidth: "680px", margin: "0 auto" }}>
+        {/* Header */}
         <div style={{ marginBottom: "2.5rem" }}>
-          <div className="tech-pill" style={{ marginBottom: "1rem" }}>
-            IDENTITY VERIFICATION
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "1rem" }}>
+            <div>
+              <span className="tech-pill" style={{ color: "#2F80FF", borderColor: "rgba(47, 128, 255, 0.3)" }}>
+                STAGE-BASED IDENTITY RESOLUTION
+              </span>
+              <h1 style={{ fontSize: "2.25rem", fontWeight: 700, letterSpacing: "-0.03em", marginTop: "0.5rem" }}>
+                Verify Your Identity
+              </h1>
+            </div>
+            {referenceId && (
+              <div style={{ background: "rgba(255,255,255,0.05)", padding: "6px 12px", borderRadius: "6px", border: "1px solid var(--border-color)", fontSize: "0.75rem", fontFamily: "var(--font-mono)" }}>
+                REF: <strong style={{ color: "#2F80FF" }}>{referenceId}</strong>
+              </div>
+            )}
           </div>
-          <h1
-            className="font-serif"
-            style={{
-              fontSize: "clamp(2rem, 4vw, 2.75rem)",
-              fontWeight: 500,
-              color: "#FFFFFF",
-              letterSpacing: "-0.02em",
-              marginBottom: "0.5rem",
-            }}
-          >
-            Verify Your Identity
-          </h1>
-          <p style={{ fontSize: "0.95rem", color: "var(--text-muted)" }}>
-            Please complete the verification steps below.
+          <p style={{ color: "var(--text-muted)", fontSize: "0.95rem", marginTop: "0.5rem" }}>
+            Deterministic CKYC Registry Match • OTP Authentication • Biometric Anti-Spoofing
           </p>
         </div>
 
-        {/* Multi-Step Indicator */}
+        {/* Stepper Navigation */}
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "1fr 1fr 1fr",
-            gap: "8px",
-            marginBottom: "2.5rem",
-            fontFamily: "var(--font-mono)",
-            fontSize: "0.725rem",
+            gridTemplateColumns: "repeat(4, 1fr)",
+            gap: "0.5rem",
+            marginBottom: "2rem",
           }}
         >
           {[
             { id: "details", label: "01 DETAILS" },
-            { id: "document", label: "02 ID DOCUMENT" },
-            { id: "liveness", label: "03 LIVENESS" },
-          ].map((s) => {
+            { id: "otp", label: "02 PHONE OTP" },
+            { id: "document", label: "03 ID DOCUMENT" },
+            { id: "liveness", label: "04 LIVENESS" },
+          ].map((s, idx) => {
+            const stepOrder = ["details", "otp", "document", "liveness", "processing", "result"];
+            const currentIdx = stepOrder.indexOf(step);
+            const isCompleted = currentIdx > idx;
             const isCurrent = step === s.id;
-            const isCompleted =
-              (s.id === "details" && step !== "details") ||
-              (s.id === "document" && (step === "liveness" || step === "processing" || step === "result"));
+
             return (
               <div
                 key={s.id}
                 style={{
-                  padding: "8px 12px",
+                  padding: "0.6rem 0.5rem",
+                  background: isCurrent ? "rgba(47, 128, 255, 0.1)" : "rgba(255, 255, 255, 0.02)",
+                  border: isCurrent
+                    ? "1px solid #2F80FF"
+                    : isCompleted
+                    ? "1px solid rgba(16, 185, 129, 0.4)"
+                    : "1px solid var(--border-color)",
                   borderRadius: "4px",
-                  background: isCurrent ? "rgba(59, 130, 246, 0.1)" : "rgba(255, 255, 255, 0.02)",
-                  border: isCurrent ? "1px solid #3B82F6" : "1px solid var(--border-color)",
-                  color: isCurrent ? "#3B82F6" : isCompleted ? "#10B981" : "var(--text-dim)",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "space-between",
+                  fontSize: "0.72rem",
+                  fontFamily: "var(--font-mono)",
+                  color: isCurrent ? "#2F80FF" : isCompleted ? "#10B981" : "var(--text-muted)",
                 }}
               >
                 <span>{s.label}</span>
-                {isCompleted && <CheckCircle2 size={13} />}
+                {isCompleted && <CheckCircle2 size={12} style={{ color: "#10B981" }} />}
               </div>
             );
           })}
         </div>
 
-        {/* ── STEP 1: DETAILS ──────────────────────────────────────────────── */}
+        {/* ── STEP 1: IDENTITY DETAILS ────────────────────────────────────── */}
         {step === "details" && (
-          <div
+          <form
+            onSubmit={handleStartVerification}
             style={{
               background: "#0a0a0a",
               border: "1px solid var(--border-color)",
@@ -240,73 +391,233 @@ export default function OnboardingPage() {
             }}
           >
             <div>
-              <label style={{ display: "block", fontSize: "0.825rem", color: "var(--text-muted)", marginBottom: "6px" }}>
-                Legal Full Name
+              <h3 style={{ fontSize: "1.1rem", fontWeight: 600, color: "#FFFFFF", marginBottom: "0.35rem" }}>
+                Applicant Registry Lookup
+              </h3>
+              <p style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
+                Enter your exact legal name, date of birth, and Central KYC identifier.
+              </p>
+            </div>
+
+            {/* Seed test ID helper badges */}
+            <div style={{ background: "rgba(255,255,255,0.03)", padding: "10px 12px", borderRadius: "6px", border: "1px solid var(--border-color)" }}>
+              <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginBottom: "6px" }}>⚡ Quick Test Identifiers:</div>
+              <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                {[
+                  { label: "Aarav Sharma (New)", ckyc: "CKYC-10001", dob: "1994-05-14", name: "Aarav Sharma" },
+                  { label: "Priya Patel (New)", ckyc: "CKYC-10002", dob: "1997-08-22", name: "Priya Patel" },
+                  { label: "Vikram Malhotra (Already Verified)", ckyc: "CKYC-10003", dob: "1991-11-03", name: "Vikram Malhotra" },
+                ].map((item) => (
+                  <button
+                    key={item.ckyc}
+                    type="button"
+                    onClick={() => {
+                      setLegalName(item.name);
+                      setDateOfBirth(item.dob);
+                      setCkycNumber(item.ckyc);
+                    }}
+                    style={{
+                      background: "rgba(47, 128, 255, 0.1)",
+                      border: "1px solid rgba(47, 128, 255, 0.3)",
+                      color: "#93c5fd",
+                      borderRadius: "4px",
+                      padding: "4px 8px",
+                      fontSize: "0.7rem",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label style={{ display: "block", fontSize: "0.8rem", color: "var(--text-muted)", marginBottom: "0.4rem" }}>
+                Full Legal Name
               </label>
               <input
                 type="text"
+                required
                 value={legalName}
-                placeholder="e.g. Jane Doe"
                 onChange={(e) => setLegalName(e.target.value)}
+                placeholder="e.g. Aarav Sharma"
                 style={{
                   width: "100%",
-                  padding: "0.85rem 1rem",
                   background: "#000000",
                   border: "1px solid var(--border-color)",
                   borderRadius: "4px",
+                  padding: "0.75rem 1rem",
                   color: "#FFFFFF",
-                  fontSize: "0.95rem",
+                  fontSize: "0.9rem",
                   outline: "none",
                 }}
               />
             </div>
 
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+              <div>
+                <label style={{ display: "block", fontSize: "0.8rem", color: "var(--text-muted)", marginBottom: "0.4rem" }}>
+                  Date of Birth
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={dateOfBirth}
+                  onChange={(e) => setDateOfBirth(e.target.value)}
+                  style={{
+                    width: "100%",
+                    background: "#000000",
+                    border: "1px solid var(--border-color)",
+                    borderRadius: "4px",
+                    padding: "0.75rem 1rem",
+                    color: "#FFFFFF",
+                    fontSize: "0.9rem",
+                    outline: "none",
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: "block", fontSize: "0.8rem", color: "var(--text-muted)", marginBottom: "0.4rem" }}>
+                  CKYC / National ID Number
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={ckycNumber}
+                  onChange={(e) => setCkycNumber(e.target.value)}
+                  placeholder="e.g. CKYC-10001"
+                  style={{
+                    width: "100%",
+                    background: "#000000",
+                    border: "1px solid var(--border-color)",
+                    borderRadius: "4px",
+                    padding: "0.75rem 1rem",
+                    color: "#FFFFFF",
+                    fontSize: "0.9rem",
+                    fontFamily: "var(--font-mono)",
+                    outline: "none",
+                  }}
+                />
+              </div>
+            </div>
+
+            {errorMsg && (
+              <div style={{ color: "#EF4444", fontSize: "0.825rem", display: "flex", alignItems: "center", gap: "8px", background: "rgba(239, 68, 68, 0.1)", padding: "10px 12px", borderRadius: "4px", border: "1px solid rgba(239, 68, 68, 0.3)" }}>
+                <AlertCircle size={16} /> {errorMsg}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="btn-primary-blue"
+              style={{ justifyContent: "center", padding: "0.85rem" }}
+            >
+              <span>{isSubmitting ? "Matching Registry..." : "Start Verification Session"}</span>
+              <ArrowRight size={16} />
+            </button>
+          </form>
+        )}
+
+        {/* ── STEP 2: PHONE OTP VERIFICATION ──────────────────────────────── */}
+        {step === "otp" && (
+          <form
+            onSubmit={handleVerifyOtp}
+            style={{
+              background: "#0a0a0a",
+              border: "1px solid var(--border-color)",
+              borderRadius: "6px",
+              padding: "2rem",
+              display: "flex",
+              flexDirection: "column",
+              gap: "1.5rem",
+            }}
+          >
             <div>
-              <label style={{ display: "block", fontSize: "0.825rem", color: "var(--text-muted)", marginBottom: "6px" }}>
-                Session Reference Token
+              <h3 style={{ fontSize: "1.1rem", fontWeight: 600, color: "#FFFFFF", marginBottom: "0.35rem" }}>
+                Phone Number Verification (MFA)
+              </h3>
+              <p style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
+                We sent a 6-digit one-time passcode to your registered phone number: <strong style={{ color: "#FFFFFF" }}>{maskedPhone}</strong>
+              </p>
+            </div>
+
+            {demoOtp && (
+              <div style={{ background: "rgba(47, 128, 255, 0.1)", border: "1px solid rgba(47, 128, 255, 0.4)", padding: "10px 14px", borderRadius: "6px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ fontSize: "0.8rem", color: "#93c5fd" }}>
+                  🧪 <strong>Demo Mode OTP:</strong> <code>{demoOtp}</code>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setOtpInput(demoOtp)}
+                  style={{ background: "#2F80FF", color: "white", border: "none", borderRadius: "4px", padding: "4px 8px", fontSize: "0.72rem", cursor: "pointer" }}
+                >
+                  Auto-fill
+                </button>
+              </div>
+            )}
+
+            <div>
+              <label style={{ display: "block", fontSize: "0.8rem", color: "var(--text-muted)", marginBottom: "0.4rem" }}>
+                Enter 6-Digit Passcode
               </label>
               <input
                 type="text"
-                value={kinToken}
-                readOnly
+                maxLength={6}
+                required
+                value={otpInput}
+                onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, ""))}
+                placeholder="• • • • • •"
                 style={{
                   width: "100%",
-                  padding: "0.85rem 1rem",
                   background: "#000000",
                   border: "1px solid var(--border-color)",
                   borderRadius: "4px",
-                  color: "var(--text-muted)",
+                  padding: "0.75rem 1rem",
+                  color: "#FFFFFF",
+                  fontSize: "1.25rem",
+                  textAlign: "center",
+                  letterSpacing: "0.3em",
                   fontFamily: "var(--font-mono)",
-                  fontSize: "0.85rem",
+                  outline: "none",
                 }}
               />
             </div>
 
-            <button
-              onClick={() => {
-                if (!legalName.trim()) {
-                  setErrorMsg("Please enter your legal full name.");
-                  return;
-                }
-                setErrorMsg(null);
-                setStep("document");
-              }}
-              className="btn-primary-blue"
-              style={{ justifyContent: "center", marginTop: "0.5rem" }}
-            >
-              <span>Continue to Document Upload</span>
-              <ArrowRight size={16} />
-            </button>
-
-            {errorMsg && (
+            {otpError && (
               <div style={{ color: "#EF4444", fontSize: "0.8rem", display: "flex", alignItems: "center", gap: "6px" }}>
-                <AlertCircle size={14} /> {errorMsg}
+                <AlertCircle size={14} /> {otpError}
               </div>
             )}
-          </div>
+
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <button
+                type="button"
+                onClick={handleResendOtp}
+                style={{ background: "transparent", border: "none", color: "#2F80FF", fontSize: "0.8rem", cursor: "pointer" }}
+              >
+                Resend Code
+              </button>
+              <div style={{ fontSize: "0.75rem", color: "var(--text-dim)" }}>
+                {remainingOtpAttempts} attempts remaining
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={isSubmitting || otpInput.length < 6}
+              className="btn-primary-blue"
+              style={{ justifyContent: "center", padding: "0.85rem" }}
+            >
+              <span>{isSubmitting ? "Verifying..." : "Confirm & Proceed to Document Check"}</span>
+              <ArrowRight size={16} />
+            </button>
+          </form>
         )}
 
-        {/* ── STEP 2: ID DOCUMENT ─────────────────────────────────────────── */}
+        {/* ── STEP 3: ID DOCUMENT UPLOAD ──────────────────────────────────── */}
         {step === "document" && (
           <div
             style={{
@@ -324,7 +635,7 @@ export default function OnboardingPage() {
                 Government Photo ID
               </h3>
               <p style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
-                Upload your passport, identity card, or driving license.
+                Upload your passport, national identity card, or driver's license for OCR matching.
               </p>
             </div>
 
@@ -337,10 +648,9 @@ export default function OnboardingPage() {
                 flexDirection: "column",
                 alignItems: "center",
                 justifyContent: "center",
-                gap: "10px",
+                gap: "0.75rem",
                 cursor: "pointer",
-                background: docFile ? "rgba(59, 130, 246, 0.04)" : "#000000",
-                transition: "border-color 0.2s",
+                backgroundColor: "rgba(255, 255, 255, 0.01)",
               }}
             >
               <input
@@ -353,7 +663,20 @@ export default function OnboardingPage() {
                 }}
                 style={{ display: "none" }}
               />
-              <Upload size={24} color={docFile ? "#3B82F6" : "var(--text-dim)"} />
+              <div
+                style={{
+                  width: "48px",
+                  height: "48px",
+                  borderRadius: "50%",
+                  background: "rgba(255, 255, 255, 0.05)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#FFFFFF",
+                }}
+              >
+                <Upload size={20} />
+              </div>
               <div style={{ textAlign: "center" }}>
                 <div style={{ fontSize: "0.9rem", color: docFile ? "#FFFFFF" : "var(--text-muted)", fontWeight: 500 }}>
                   {docFile ? docFile.name : "Click to upload identity document"}
@@ -366,25 +689,19 @@ export default function OnboardingPage() {
 
             <div style={{ display: "flex", gap: "1rem" }}>
               <button
-                onClick={() => setStep("details")}
+                onClick={() => setStep("otp")}
                 className="btn-secondary"
                 style={{ flex: 1 }}
               >
                 ← Back
               </button>
               <button
-                onClick={() => {
-                  if (!docFile) {
-                    setErrorMsg("Please select a document photo.");
-                    return;
-                  }
-                  setErrorMsg(null);
-                  setStep("liveness");
-                }}
+                onClick={handleDocumentSubmit}
+                disabled={isSubmitting || !docFile}
                 className="btn-primary-blue"
                 style={{ flex: 2, justifyContent: "center" }}
               >
-                <span>Continue to Liveness Check</span>
+                <span>{isSubmitting ? "Running OCR..." : "Continue to Liveness Check"}</span>
                 <ArrowRight size={16} />
               </button>
             </div>
@@ -397,7 +714,7 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        {/* ── STEP 3: CAMERA LIVENESS ──────────────────────────────────────── */}
+        {/* ── STEP 4: CAMERA LIVENESS & ANTI-SPOOFING ─────────────────────── */}
         {step === "liveness" && (
           <div
             style={{
@@ -412,10 +729,10 @@ export default function OnboardingPage() {
           >
             <div>
               <h3 style={{ fontSize: "1.1rem", fontWeight: 600, color: "#FFFFFF", marginBottom: "0.35rem" }}>
-                Live Presence Challenge
+                Live Presence & Anti-Spoofing Challenge
               </h3>
               <p style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
-                Position your face inside the guide and perform the required action challenge during the 5-second recording.
+                Position your face inside the guide and perform the prompted action during the 5-second recording.
               </p>
             </div>
 
@@ -575,11 +892,11 @@ export default function OnboardingPage() {
                     <RotateCcw size={14} /> Retake
                   </button>
                   <button
-                    onClick={handleSubmitVerification}
+                    onClick={handleSubmitLiveness}
                     className="btn-primary-blue"
                     style={{ flex: 1, justifyContent: "center" }}
                   >
-                    <span>Submit for Verification</span>
+                    <span>Finalize Verification</span>
                     <ArrowRight size={16} />
                   </button>
                 </div>
@@ -594,7 +911,7 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        {/* ── STEP 4: PROCESSING ───────────────────────────────────────────── */}
+        {/* ── STEP 5: PROCESSING ─────────────────────────────────────────── */}
         {step === "processing" && (
           <div
             style={{
@@ -603,144 +920,155 @@ export default function OnboardingPage() {
               borderRadius: "6px",
               padding: "4rem 2rem",
               textAlign: "center",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "1.5rem",
             }}
           >
             <div
               style={{
-                width: "44px",
-                height: "44px",
-                border: "2px solid rgba(59, 130, 246, 0.2)",
-                borderTopColor: "#3B82F6",
+                width: "48px",
+                height: "48px",
+                border: "3px solid rgba(47, 128, 255, 0.2)",
+                borderTopColor: "#2F80FF",
                 borderRadius: "50%",
-                animation: "spin 0.8s linear infinite",
-                margin: "0 auto 1.5rem",
+                animation: "spin 1s linear infinite",
               }}
             />
-            <h3
-              className="font-serif"
-              style={{ fontSize: "1.5rem", fontWeight: 500, color: "#FFFFFF", marginBottom: "0.5rem" }}
-            >
-              Evaluating Identity Verification
-            </h3>
-            <p style={{ fontSize: "0.9rem", color: "var(--text-muted)", maxWidth: "420px", margin: "0 auto" }}>
-              Hashing video bytes, matching facial templates, and sealing entry into audit chain.
-            </p>
+            <div>
+              <h3 style={{ fontSize: "1.25rem", fontWeight: 600, color: "#FFFFFF", marginBottom: "0.5rem" }}>
+                Aggregating 10-Signal Decision
+              </h3>
+              <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", maxWidth: "400px", margin: "0 auto" }}>
+                Verifying facial embeddings, evaluating anti-spoofing challenge, and sealing record into the cryptographic registry.
+              </p>
+            </div>
           </div>
         )}
 
-        {/* ── STEP 5: VERIFICATION RESULT (Camera strictly closed) ─────────── */}
-        {step === "result" && verificationOutcome && (
+        {/* ── STEP 6: VERIFICATION RESULT & DOSSIER ───────────────────────── */}
+        {step === "result" && sessionState && (
           <div
             style={{
               background: "#0a0a0a",
               border: "1px solid var(--border-color)",
               borderRadius: "6px",
               padding: "2.5rem 2rem",
-              textAlign: "center",
               display: "flex",
               flexDirection: "column",
-              gap: "1.5rem",
+              gap: "2rem",
             }}
           >
-            <div>
-              <div style={{ fontSize: "3rem", marginBottom: "0.75rem" }}>
-                {verificationOutcome.status === "approved" ? "✅" : verificationOutcome.status === "borderline" ? "⏳" : "❌"}
-              </div>
-
+            {/* Top Status Banner */}
+            <div style={{ textAlign: "center" }}>
               <div
                 style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  padding: "4px 14px",
-                  borderRadius: "4px",
-                  fontFamily: "var(--font-mono)",
-                  fontSize: "0.75rem",
-                  fontWeight: 600,
-                  marginBottom: "1rem",
+                  width: "56px",
+                  height: "56px",
+                  borderRadius: "50%",
                   background:
-                    verificationOutcome.status === "approved"
+                    sessionState.status === "VERIFIED" || sessionState.status === "ALREADY_VERIFIED"
                       ? "rgba(16, 185, 129, 0.1)"
-                      : verificationOutcome.status === "borderline"
+                      : sessionState.status === "UNDER_REVIEW"
                       ? "rgba(245, 158, 11, 0.1)"
                       : "rgba(239, 68, 68, 0.1)",
                   color:
-                    verificationOutcome.status === "approved"
+                    sessionState.status === "VERIFIED" || sessionState.status === "ALREADY_VERIFIED"
                       ? "#10B981"
-                      : verificationOutcome.status === "borderline"
+                      : sessionState.status === "UNDER_REVIEW"
                       ? "#F59E0B"
                       : "#EF4444",
-                  border: `1px solid ${
-                    verificationOutcome.status === "approved"
-                      ? "rgba(16, 185, 129, 0.3)"
-                      : verificationOutcome.status === "borderline"
-                      ? "rgba(245, 158, 11, 0.3)"
-                      : "rgba(239, 68, 68, 0.3)"
-                  }`,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  margin: "0 auto 1rem auto",
                 }}
               >
-                {verificationOutcome.status === "approved" && "VERIFIED ✓"}
-                {verificationOutcome.status === "borderline" && "UNDER REVIEW ◈"}
-                {verificationOutcome.status === "rejected" && "UNVERIFIED ✕"}
+                {sessionState.status === "VERIFIED" || sessionState.status === "ALREADY_VERIFIED" ? (
+                  <CheckCircle2 size={32} />
+                ) : sessionState.status === "UNDER_REVIEW" ? (
+                  <ShieldCheck size={32} />
+                ) : (
+                  <AlertCircle size={32} />
+                )}
               </div>
 
-              <h2
-                className="font-serif"
-                style={{ fontSize: "1.75rem", fontWeight: 500, color: "#FFFFFF", marginBottom: "0.5rem" }}
-              >
-                {verificationOutcome.status === "approved" && "You're verified"}
-                {verificationOutcome.status === "borderline" && "We're reviewing your application"}
-                {verificationOutcome.status === "rejected" && "We couldn't verify you"}
+              <h2 style={{ fontSize: "1.75rem", fontWeight: 700, letterSpacing: "-0.02em", color: "#FFFFFF", marginBottom: "0.5rem" }}>
+                {sessionState.status === "VERIFIED"
+                  ? "You're verified"
+                  : sessionState.status === "ALREADY_VERIFIED"
+                  ? "Already Verified"
+                  : sessionState.status === "UNDER_REVIEW"
+                  ? "We're reviewing your application"
+                  : "We couldn't verify you"}
               </h2>
 
               <p style={{ fontSize: "0.9rem", color: "var(--text-muted)", maxWidth: "460px", margin: "0 auto" }}>
-                {verificationOutcome.status === "approved" && "Your identity document and live presence were successfully confirmed."}
-                {verificationOutcome.status === "borderline" && "Your submission is undergoing secondary verification. We'll update your status shortly."}
-                {verificationOutcome.status === "rejected" && "We could not confirm your identity. Please ensure you are in a well-lit environment and try again."}
+                {sessionState.finalReason || "All identity parameters, cryptographic OTP, and physiological liveness signals processed."}
               </p>
             </div>
 
-            {/* Audit Reference Block */}
-            <div
-              style={{
-                background: "#000000",
-                border: "1px solid var(--border-color)",
-                borderRadius: "4px",
-                padding: "1rem",
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: "0.75rem",
-                fontFamily: "var(--font-mono)",
-                fontSize: "0.75rem",
-                textAlign: "left",
-              }}
-            >
-              <div>
-                <span style={{ color: "var(--text-dim)", display: "block" }}>Session ID</span>
-                <span style={{ color: "#FFFFFF" }}>{verificationOutcome.sessionId.slice(0, 14)}…</span>
+            {/* 10-Signal Decision Table Breakdown */}
+            <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid var(--border-color)", borderRadius: "6px", padding: "1.25rem" }}>
+              <div style={{ fontSize: "0.8rem", fontFamily: "var(--font-mono)", color: "var(--text-muted)", marginBottom: "1rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                System Decision Breakdown (10 Signals)
               </div>
-              <div>
-                <span style={{ color: "var(--text-dim)", display: "block" }}>Audit Status</span>
-                <span style={{ color: "#10B981" }}>SHA-256 Sealed</span>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+                {[
+                  { label: "Identity Record", val: sessionState.decisionTable.identity_record },
+                  { label: "Legal Name Match", val: sessionState.decisionTable.name },
+                  { label: "Date of Birth Match", val: sessionState.decisionTable.dob },
+                  { label: "CKYC Number Check", val: sessionState.decisionTable.ckyc_number },
+                  { label: "Phone OTP", val: sessionState.decisionTable.phone_otp },
+                  { label: "Document Authenticity", val: sessionState.decisionTable.document },
+                  { label: "Document Face Crop", val: sessionState.decisionTable.document_face },
+                  { label: "Live Face Match", val: sessionState.decisionTable.live_face },
+                  { label: "Liveness Challenge", val: sessionState.decisionTable.liveness },
+                  { label: "Deepfake Analysis", val: sessionState.decisionTable.deepfake_analysis },
+                ].map(({ label, val }) => {
+                  const isPass = val === "MATCH" || val === "VERIFIED" || val === "CONFIRMED" || val === "NO_ANOMALY";
+                  const isUncertain = val === "UNCERTAIN";
+                  return (
+                    <div
+                      key={label}
+                      style={{
+                        padding: "8px 12px",
+                        background: "rgba(0,0,0,0.4)",
+                        border: "1px solid rgba(255,255,255,0.05)",
+                        borderRadius: "4px",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
+                      <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>{label}</span>
+                      <span
+                        style={{
+                          fontSize: "0.72rem",
+                          fontFamily: "var(--font-mono)",
+                          fontWeight: 600,
+                          color: isPass ? "#10B981" : isUncertain ? "#F59E0B" : "#EF4444",
+                        }}
+                      >
+                        {val}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
+            {/* Action Buttons */}
             <div style={{ display: "flex", gap: "1rem", justifyContent: "center" }}>
-              <Link href="/" className="btn-secondary">
-                Return Home
+              <button onClick={handleRestart} className="btn-secondary">
+                Verify Another Identity
+              </button>
+              <Link href="/review" className="btn-primary-blue">
+                <span>View in Reviewer Console</span>
+                <ExternalLink size={14} />
               </Link>
-              {verificationOutcome.status !== "approved" && (
-                <button
-                  onClick={() => {
-                    setStep("details");
-                    setRecordedBlob(null);
-                    setDocFile(null);
-                  }}
-                  className="btn-primary-blue"
-                >
-                  Try Again
-                </button>
-              )}
             </div>
           </div>
         )}
