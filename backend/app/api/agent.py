@@ -139,6 +139,11 @@ async def get_review_case_endpoint(
 
 
 @router.post(
+    "/agent/evaluate",
+    response_model=PipelineEvaluateResponse,
+    summary="Evaluate full multi-stage onboarding pipeline",
+)
+@router.post(
     "/pipeline/evaluate",
     response_model=PipelineEvaluateResponse,
     summary="Evaluate full multi-stage onboarding pipeline",
