@@ -89,7 +89,7 @@ export default function NarrativeLayer({ scrollProgress, currentAct }: Narrative
         >
           <div className="tech-pill" style={{ marginBottom: "1.25rem" }}>
             <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: "#2F80FF", boxShadow: "0 0 8px #2F80FF" }} />
-            <span><strong style={{ color: "#2F80FF" }}>IDENTITY</strong> FIELD</span>
+            <span><strong style={{ color: "#2F80FF" }}><DecryptedText text="IDENTITY" isActive={currentAct === 0} speed={40} /></strong> FIELD</span>
             <span style={{ opacity: 0.5, fontSize: "0.68rem" }}>· {clockTick}</span>
           </div>
 
@@ -104,7 +104,7 @@ export default function NarrativeLayer({ scrollProgress, currentAct }: Narrative
               marginBottom: "1rem",
             }}
           >
-            <DecryptedText text="Selecting identity signal..." isActive={currentAct === 0} speed={40} />
+            Selecting identity signal...
           </h1>
         </motion.div>
       </section>
@@ -132,7 +132,7 @@ export default function NarrativeLayer({ scrollProgress, currentAct }: Narrative
         >
           <div className="tech-pill" style={{ marginBottom: "1.5rem" }}>
             <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: "#2F80FF", boxShadow: "0 0 8px #2F80FF" }} />
-            <span><strong style={{ color: "#2F80FF" }}>IDENTITY</strong> / 00</span>
+            <span><strong style={{ color: "#2F80FF" }}><DecryptedText text="IDENTITY" isActive={currentAct === 1} speed={40} /></strong> / 00</span>
             <span style={{ opacity: 0.5, fontSize: "0.68rem" }}>· {clockTick}</span>
           </div>
 
@@ -147,7 +147,7 @@ export default function NarrativeLayer({ scrollProgress, currentAct }: Narrative
               marginBottom: "1.25rem",
             }}
           >
-            <DecryptedText text="Before trust, there is uncertainty." isActive={currentAct === 1} speed={35} />
+            Before trust, there is uncertainty.
           </h2>
 
           <p className="text-body-readable" style={{ maxWidth: "540px" }}>
@@ -195,9 +195,9 @@ export default function NarrativeLayer({ scrollProgress, currentAct }: Narrative
             }}
           >
             <span style={{ color: "#2F80FF", fontWeight: 700 }}>
-              <DecryptedText text="IDENTITY" isActive={currentAct === 2} speed={30} />
+              <DecryptedText text="IDENTITY" isActive={currentAct === 2} speed={35} />
             </span>{" "}
-            <DecryptedText text="begins with information." isActive={currentAct === 2} speed={35} />
+            begins with information.
           </h2>
 
           <p className="text-body-readable" style={{ maxWidth: "540px" }}>
@@ -244,7 +244,7 @@ export default function NarrativeLayer({ scrollProgress, currentAct }: Narrative
               marginBottom: "1rem",
             }}
           >
-            <DecryptedText text="Entering the identity layer." isActive={currentAct === 3} speed={35} />
+            Entering the identity layer.
           </h2>
 
           <p className="text-body-readable" style={{ maxWidth: "520px", margin: "0 auto" }}>
@@ -290,7 +290,7 @@ export default function NarrativeLayer({ scrollProgress, currentAct }: Narrative
               marginBottom: "1.25rem",
             }}
           >
-            <DecryptedText text="Evidence has a physical form." isActive={currentAct === 4} speed={35} />
+            Evidence has a physical form.
           </h2>
 
           <p className="text-body-readable" style={{ marginBottom: "2rem" }}>
@@ -356,7 +356,7 @@ export default function NarrativeLayer({ scrollProgress, currentAct }: Narrative
             }}
           >
             <span style={{ color: "#FFFFFF", display: "block" }}>
-              <DecryptedText text="A document tells us who you are." isActive={isLivenessAct} speed={35} />
+              A document tells us who you are.
             </span>
             <span
               style={{
@@ -366,7 +366,7 @@ export default function NarrativeLayer({ scrollProgress, currentAct }: Narrative
                 textShadow: "0 0 25px rgba(47, 128, 255, 0.4)",
               }}
             >
-              <DecryptedText text="Liveness tells us you're here." isActive={isLivenessAct} speed={35} />
+              Liveness tells us you&apos;re here.
             </span>
           </h2>
 
@@ -466,9 +466,9 @@ export default function NarrativeLayer({ scrollProgress, currentAct }: Narrative
             }}
           >
             <span style={{ color: "#2F80FF", fontWeight: 700 }}>
-              <DecryptedText text="IDENTITY" isActive={currentAct === 6} speed={30} />
+              <DecryptedText text="IDENTITY" isActive={currentAct === 6} speed={35} />
             </span>{" "}
-            <DecryptedText text="verified." isActive={currentAct === 6} speed={35} />
+            verified.
           </h2>
 
           <p className="text-body-readable" style={{ maxWidth: "560px", margin: "0 auto 2rem" }}>
@@ -541,7 +541,7 @@ export default function NarrativeLayer({ scrollProgress, currentAct }: Narrative
               marginBottom: "1.25rem",
             }}
           >
-            Verify your <span style={{ color: "#2F80FF", fontWeight: 700 }}><DecryptedText text="identity" isActive={currentAct === 7} speed={30} /></span>.
+            Verify your <span style={{ color: "#2F80FF", fontWeight: 700 }}><DecryptedText text="identity" isActive={currentAct === 7} speed={35} /></span>.
           </h2>
 
           <p className="text-body-readable" style={{ maxWidth: "560px", margin: "0 auto 2.5rem" }}>
