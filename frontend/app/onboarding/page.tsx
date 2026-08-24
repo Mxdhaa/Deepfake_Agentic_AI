@@ -243,11 +243,7 @@ export default function OnboardingPage() {
       setDocumentResult(res);
       setStep("liveness");
     } catch (err: any) {
-      if (err.error === "IDENTITY_DETAILS_MISMATCH") {
-        setErrorMsg("Document identity details mismatch with CKYC record. Please ensure the document belongs to " + legalName);
-      } else {
-        setErrorMsg(err.message || "Document processing failed. Please try a clearer image.");
-      }
+      setErrorMsg(err.message || "Document verification failed. Please ensure you upload a valid ID card containing a clear face portrait.");
     } finally {
       setIsSubmitting(false);
     }

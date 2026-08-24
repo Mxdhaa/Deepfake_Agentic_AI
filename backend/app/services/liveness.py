@@ -261,30 +261,41 @@ def detect_motion(
 
         prev_gray = gray
 
+    # Directional and magnitude optical flow metrics
     mean_mag = float(np.mean(magnitudes)) if magnitudes else 0.0
-    has_general_motion = motion_frame_count >= min_motion and mean_mag > 0.05
+    mean_dx = float(np.mean(dx_values)) if dx_values else 0.0
+    min_dx = float(np.min(dx_values)) if dx_values else 0.0
+    max_dx = float(np.max(dx_values)) if dx_values else 0.0
+    mean_dy = float(np.mean(dy_values)) if dy_values else 0.0
+    max_abs_dy = float(max(abs(y) for y in dy_values)) if dy_values else 0.0
 
-    # Evaluate specific challenge matching
-    challenge_passed = has_general_motion
+    has_general_motion = motion_frame_count >= min_motion and mean_mag > 0.04
+
+    # Strict Challenge Matching
     c_type = (expected_challenge or "general_motion").lower().strip()
+    challenge_passed = False
 
     if not has_general_motion:
         challenge_passed = False
+    elif c_type == "turn_left":
+        # Turning left in selfie view causes leftward optical flow (min_dx or mean_dx negative)
+        challenge_passed = min_dx < -0.06 or mean_dx < -0.03
+    elif c_type == "turn_right":
+        # Turning right in selfie view causes rightward optical flow (max_dx or mean_dx positive)
+        challenge_passed = max_dx > 0.06 or mean_dx > 0.03
+    elif c_type in {"nod_head", "look_up"}:
+        # Vertical movement (up/down)
+        challenge_passed = max_abs_dy > 0.08
     elif c_type in {"blink_twice", "turn_and_blink"}:
         if blinks and blinks.get("detection_available"):
-            challenge_passed = blinks.get("blink_count", 0) >= 1 or has_general_motion
+            challenge_passed = blinks.get("blink_count", 0) >= 1
         else:
-            challenge_passed = has_general_motion
-    elif c_type in {"turn_left", "turn_right"}:
-        # Check horizontal motion amplitude
-        max_abs_dx = max(abs(x) for x in dx_values) if dx_values else 0.0
-        challenge_passed = has_general_motion and max_abs_dx > 0.15
-    elif c_type in {"nod_head", "look_up"}:
-        # Check vertical motion amplitude
-        max_abs_dy = max(abs(y) for y in dy_values) if dy_values else 0.0
-        challenge_passed = has_general_motion and max_abs_dy > 0.15
+            # When mediapipe is unavailable, require distinct localized motion bursts
+            challenge_passed = has_general_motion and motion_frame_count >= 2 and mean_mag > 0.06
     elif c_type in {"tilt_head", "slow_circle", "smile", "raise_eyebrows"}:
-        challenge_passed = has_general_motion and mean_mag > 0.12
+        challenge_passed = has_general_motion and mean_mag > 0.08
+    else:
+        challenge_passed = has_general_motion
 
     result = MotionResult(
         motion_detected=has_general_motion,
@@ -474,7 +485,10 @@ def compute_anomaly_score(
     anomaly_score = float(np.clip(c_deepfake + c_challenge + c_blink + c_av_sync, 0.0, 1.0))
 
     # ── Decision ───────────────────────────────────────────────────────────────
-    if anomaly_score >= float(T["anomaly_fail"]):
+    if not challenge_match:
+        decision = "fail"
+        anomaly_score = max(anomaly_score, float(T["anomaly_fail"]))
+    elif anomaly_score >= float(T["anomaly_fail"]):
         decision = "fail"
     elif anomaly_score >= float(T["anomaly_borderline"]):
         decision = "borderline"

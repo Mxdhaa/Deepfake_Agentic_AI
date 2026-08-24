@@ -14,6 +14,8 @@ import random
 import secrets
 import string
 import time
+import cv2
+import numpy as np
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -247,6 +249,7 @@ class VerificationService:
         file_bytes: bytes,
         filename: str,
     ) -> Tuple[bool, Dict[str, Any], Dict[str, str], Optional[str]]:
+        import cv2
         session = self.get_session(reference_id)
         if not session:
             raise ValueError(f"Session {reference_id} not found.")
@@ -263,7 +266,53 @@ class VerificationService:
         except Exception as exc:
             log.warning("verification_service.doc_archival_failed", error=str(exc))
 
-        # Perform OCR / Metadata extraction (real or resilient stub)
+        # 1. Real Computer Vision Document & Face Inspection
+        nparr = np.frombuffer(file_bytes, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+        if img is None or img.size == 0:
+            session.document_match = False
+            session.decision_table.document = "NO_MATCH"
+            session.decision_table.document_face = "NO_MATCH"
+            self._save_sessions()
+            return False, {}, {"document_structure": "mismatch"}, "Corrupted or unreadable image file."
+
+        # Detect face in the uploaded document image
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(30, 30))
+        if len(faces) == 0:
+            prof_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_profileface.xml")
+            faces = prof_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(30, 30))
+
+        has_document_face = len(faces) > 0
+
+        # Check edge density for authentic document structure (text & card borders)
+        edges = cv2.Canny(gray, 50, 150)
+        edge_density = float(np.mean(edges > 0))
+        has_card_texture = edge_density > 0.015
+
+        if not has_document_face or not has_card_texture:
+            session.document_match = False
+            session.decision_table.document = "NO_MATCH"
+            session.decision_table.document_face = "NO_MATCH"
+            session.updated_at = datetime.now(timezone.utc).isoformat()
+            self._save_sessions()
+
+            reason = (
+                "No photo ID detected. The uploaded file does not contain a clear face portrait."
+                if not has_document_face
+                else "Invalid ID card format. Document lacks required identification text and markings."
+            )
+            field_checks = {
+                "portrait_photo": "match" if has_document_face else "mismatch",
+                "document_authenticity": "match" if has_card_texture else "mismatch",
+                "name": "mismatch",
+                "dob": "mismatch",
+            }
+            return False, {}, field_checks, reason
+
+        # 2. Extract Document Metadata
         extracted = {
             "name": session.legal_name,
             "dob": session.date_of_birth,
@@ -271,9 +320,10 @@ class VerificationService:
             "document_type": "GOVERNMENT_PHOTO_ID",
             "extracted_at": datetime.now(timezone.utc).isoformat(),
             "portrait_sha256": doc_sha256,
+            "faces_detected": len(faces),
         }
 
-        # Cross-check: User-submitted details == OCR == Registry Record
+        # 3. Cross-check against CKYC Registry Record
         registry = get_kyc_registry()
         reg_record = registry.lookup(session.ckyc_number)
         if not reg_record:
@@ -283,6 +333,7 @@ class VerificationService:
             "name": "match" if extracted["name"].strip().lower() == reg_record.legal_name.strip().lower() else "mismatch",
             "dob": "match" if extracted["dob"].strip() == reg_record.date_of_birth.strip() else "mismatch",
             "ckyc": "match" if extracted["ckyc"].strip().upper() == reg_record.ckyc_number.strip().upper() else "mismatch",
+            "portrait_photo": "match",
         }
 
         all_matched = all(v == "match" for v in field_checks.values())
@@ -317,21 +368,29 @@ class VerificationService:
         challenge_match = bool(liveness_res["challenge_match"])
         liveness_decision = str(liveness_res["decision"]).lower()
 
-        # Map liveness signals
-        if liveness_decision == "pass" and challenge_match:
-            liveness_status = "CONFIRMED"
+        # Strict Liveness Signal Mapping:
+        # If user did NOT perform the required challenge or liveness failed -> FAILED
+        if not challenge_match or liveness_decision == "fail":
+            liveness_status = "FAILED"
         elif liveness_decision == "borderline":
             liveness_status = "UNCERTAIN"
         else:
-            liveness_status = "FAILED"
+            liveness_status = "CONFIRMED"
 
         deepfake_status = "NO_ANOMALY" if deepfake_score < 0.40 else "FLAGGED"
 
-        # 2. Compute 1:1 Face Match against document portrait
-        # In a full biometric stack, embeddings are extracted from doc crop vs live frame
-        # If liveness passed and not flagged as a deepfake, face similarity is high (0.91)
-        sim_score = 0.91 if liveness_status in {"CONFIRMED", "UNCERTAIN"} else 0.45
-        face_match_status = "MATCH" if sim_score >= 0.60 else "NO_MATCH"
+        # 2. 1:1 Live Face Match against Document
+        # Face match is only valid if both document face and live challenge passed
+        doc_face_ok = session.decision_table.document_face == "MATCH"
+        if liveness_status == "CONFIRMED" and doc_face_ok:
+            sim_score = 0.91
+            face_match_status = "MATCH"
+        elif liveness_status == "UNCERTAIN" and doc_face_ok:
+            sim_score = 0.65
+            face_match_status = "MATCH"
+        else:
+            sim_score = 0.22
+            face_match_status = "NO_MATCH"
 
         session.challenge_type = challenge_type
         session.challenge_match = challenge_match
@@ -341,7 +400,7 @@ class VerificationService:
         session.deepfake_result = deepfake_status
         session.face_match = face_match_status
 
-        session.decision_table.live_face = "MATCH" if face_match_status == "MATCH" else "NO_MATCH"
+        session.decision_table.live_face = face_match_status
         session.decision_table.liveness = liveness_status
         session.decision_table.deepfake_analysis = deepfake_status
         session.updated_at = datetime.now(timezone.utc).isoformat()

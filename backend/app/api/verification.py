@@ -256,7 +256,7 @@ async def upload_document(
                 status_code=400,
                 content={
                     "error": "IDENTITY_DETAILS_MISMATCH",
-                    "message": "Document identity details mismatch with CKYC record.",
+                    "message": err_msg or "Document identity details mismatch with CKYC record.",
                     "referenceId": reference_id,
                     "documentMatch": False,
                     "extractedFields": extracted,
