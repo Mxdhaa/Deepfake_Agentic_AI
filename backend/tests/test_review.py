@@ -172,7 +172,7 @@ def test_review_queue_status_filtering(tmp_audit_chain, tmp_queue):
     c3 = enqueue_case_for_review({"session_id": "s3", "legal_name": "Charlie", "kin_token": "k3"}, queue_path=tmp_queue)
     resolve_case(case_id=c3, action="reject", reviewer_id="auditor_1", queue_path=tmp_queue)
 
-    with patch.dict(os.environ, {"REVIEWER_TOKEN": "token-test-123"}):
+    with patch.dict(os.environ, {"REVIEWER_TOKEN": "token-test-123", "REVIEW_QUEUE_PATH": str(tmp_queue), "STORAGE_LOCAL_ROOT": str(tmp_queue.parent)}):
         headers = {"X-Reviewer-Token": "token-test-123"}
 
         # Filter: pending_review (should return only c1)

@@ -75,31 +75,31 @@ async def start_verification(payload: StartVerificationRequest) -> Any:
         )
 
     registry = get_kyc_registry()
-    matched_record = registry.match_identity(legal_name, dob, ckyc)
+    existing_record = registry.lookup(ckyc)
 
-    if not matched_record:
-        log.warning("verification.start.identity_not_found", ckyc=ckyc, name=legal_name)
-        return JSONResponse(
-            status_code=404,
-            content={
-                "error": "IDENTITY_NOT_FOUND",
-                "message": "We couldn't find a matching identity record. Please check your details.",
-            },
-        )
-
-    service = get_verification_service()
-
-    # CHANGE 1 — Already-verified shortcut
-    if matched_record.verification_status == "VERIFIED":
+    # If identity is already verified, take already-verified shortcut
+    if existing_record and existing_record.verification_status == "VERIFIED" and registry.match_identity(legal_name, dob, ckyc):
         log.info("verification.start.already_verified", ckyc=ckyc)
-        verified_session = service.create_verified_session(matched_record)
+        service = get_verification_service()
+        verified_session = service.create_verified_session(existing_record)
         return {
             "referenceId": verified_session.reference_id,
             "status": "ALREADY_VERIFIED",
             "message": "This identity has already completed verification. No further KYC is required.",
-            "maskedPhone": matched_record.registered_phone[:4] + " ******" + matched_record.registered_phone[-4:],
+            "maskedPhone": existing_record.registered_phone[:4] + " ******" + existing_record.registered_phone[-4:],
             "stages_completed": ["IDENTITY_MATCH", "PHONE_OTP", "DOCUMENT", "LIVENESS", "VERIFIED"],
         }
+
+    # Auto-enroll / upsert applicant in database and persist immediately
+    log.info("verification.start.upsert_applicant", ckyc=ckyc, name=legal_name)
+    matched_record = registry.upsert_applicant(
+        ckyc_number=ckyc,
+        legal_name=legal_name,
+        date_of_birth=dob,
+        verification_status="PENDING",
+    )
+
+    service = get_verification_service()
 
     # Create new IN_PROGRESS session
     session = service.create_session(matched_record)
@@ -110,6 +110,7 @@ async def start_verification(payload: StartVerificationRequest) -> Any:
         "status": session.status,
         "message": "Identity record confirmed. Proceed to OTP verification.",
         "maskedPhone": masked_phone,
+        "challengeSequence": session.challenge_sequence,
     }
 
 
@@ -145,6 +146,12 @@ async def get_session_status(reference_id: str) -> Any:
         "finalReason": session.final_reason,
         "decisionTable": session.decision_table,
         "documentDetails": session.document_details,
+        "detectionMode": session.detection_mode,
+        "challengeSequence": session.challenge_sequence,
+        "retryCount": getattr(session, "retry_count", 0),
+        "retryRequested": getattr(session, "retry_requested", False),
+        "retryNote": getattr(session, "retry_note", None),
+        "agentReasoningTrace": getattr(session, "agent_reasoning_trace", None),
     }
 
 
@@ -285,7 +292,7 @@ async def upload_document(
 async def upload_liveness(
     reference_id: str,
     clip: UploadFile = File(..., description="Recorded video clip from liveness challenge"),
-    challenge_type: Optional[str] = Form("blink_twice"),
+    challenge_type: Optional[str] = Form(None),
 ) -> Any:
     service = get_verification_service()
     clip_bytes = await clip.read()
@@ -303,10 +310,23 @@ async def upload_liveness(
             "deepfakeResult": res["deepfakeResult"],
             "deepfakeScore": res["deepfakeScore"],
             "challengeMatch": res["challengeMatch"],
+            "detectionMode": res.get("detectionMode", "heuristic_fallback"),
+            "detectedSequence": res.get("detectedSequence", []),
+            "expectedSequence": res.get("expectedSequence", []),
             "message": "Liveness analysis and face template matching completed.",
         }
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail={"error": "SESSION_NOT_FOUND", "message": str(exc)})
+        err_msg = str(exc)
+        if "SESSION_ALREADY_CLOSED" in err_msg:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "error": "SESSION_ALREADY_CLOSED",
+                    "message": "This session has already reached a terminal state and cannot accept further recordings.",
+                    "referenceId": reference_id,
+                },
+            )
+        raise HTTPException(status_code=404, detail={"error": "SESSION_NOT_FOUND", "message": err_msg})
 
 
 # ── 7. Finalize Verification ──────────────────────────────────────────────────
@@ -333,9 +353,23 @@ async def finalize_verification(reference_id: str) -> Any:
             "finalReason": final_reason,
             "decisionTable": dt,
             "verifiedAt": verified_at,
+            "retryRequested": getattr(session, "retry_requested", False),
+            "retryCount": getattr(session, "retry_count", 0),
+            "retryNote": getattr(session, "retry_note", None),
+            "challengeSequence": session.challenge_sequence,
+            "agentReasoningTrace": getattr(session, "agent_reasoning_trace", None),
         }
     except ValueError as exc:
         err_msg = str(exc)
+        if "SESSION_ALREADY_CLOSED" in err_msg:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "error": "SESSION_ALREADY_CLOSED",
+                    "message": "This session has already reached a terminal state.",
+                    "referenceId": reference_id,
+                },
+            )
         if "STAGES_INCOMPLETE" in err_msg:
             return JSONResponse(
                 status_code=400,

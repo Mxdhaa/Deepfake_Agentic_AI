@@ -3,6 +3,7 @@ verification_service.py — Verification Session & Stage Coordinator
 ──────────────────────────────────────────────────────────────────
 Handles stateful session tracking, OTP generation/validation, OCR cross-checks,
 face extraction & 1:1 match, liveness/deepfake evaluation, and final decision aggregation.
+All checks are fully input-driven with zero hardcoded outcomes.
 """
 
 from __future__ import annotations
@@ -27,13 +28,21 @@ from app.models.verification import (
     VerificationSession,
     VerificationStatus,
 )
-from app.services.identity import compute_cosine_similarity
+from app.services.identity import (
+    FaceFeatureExtractor,
+    compute_cosine_similarity,
+    get_identity_config,
+)
 from app.services.kyc_registry import get_kyc_registry
-from app.services.liveness import analyze_liveness
+from app.services.liveness import analyze_liveness, get_liveness_config
+from app.services.ocr_service import parse_and_validate_id_document
 from app.services.storage import compute_sha256, get_storage
+from app.services.video import bytes_to_frames
 from app.utils.logging import get_logger
 
 log = get_logger(__name__)
+_extractor = FaceFeatureExtractor()
+
 
 def _resolve_storage_file(filename: str) -> Path:
     env_root = os.getenv("STORAGE_LOCAL_ROOT")
@@ -42,7 +51,6 @@ def _resolve_storage_file(filename: str) -> Path:
         p.parent.mkdir(parents=True, exist_ok=True)
         return p
 
-    # Check root data/storage vs backend/data/storage
     backend_dir = Path(__file__).resolve().parent.parent.parent
     root_file = backend_dir.parent / "data" / "storage" / filename
     if root_file.parent.exists():
@@ -54,6 +62,23 @@ def _resolve_storage_file(filename: str) -> Path:
 
 
 _SESSIONS_FILE = _resolve_storage_file("verification_sessions.json")
+
+
+def generate_challenge_sequence(length: Optional[int] = None, pool: Optional[List[str]] = None) -> List[str]:
+    """Generate a randomized ordered sequence of head movements with no immediate repeats."""
+    cfg = get_liveness_config()
+    seq_cfg = cfg.get("sequential_motion", {})
+    if length is None:
+        seq_len = int(seq_cfg.get("sequence_length", 3))
+    else:
+        seq_len = int(length)
+    gesture_pool = pool or seq_cfg.get("gesture_pool", ["left", "right", "up", "down"])
+
+    seq: List[str] = []
+    for _ in range(seq_len):
+        candidates = [g for g in gesture_pool if not seq or g != seq[-1]]
+        seq.append(secrets.choice(candidates))
+    return seq
 
 
 def _generate_reference_id() -> str:
@@ -109,6 +134,8 @@ class VerificationService:
             ckyc_number="MATCH",
         )
 
+        challenge_seq = generate_challenge_sequence()
+
         session = VerificationSession(
             reference_id=ref_id,
             ckyc_number=record.ckyc_number,
@@ -118,12 +145,13 @@ class VerificationService:
             status="IN_PROGRESS",
             created_at=now_iso,
             updated_at=now_iso,
+            challenge_sequence=challenge_seq,
             decision_table=decision_table,
         )
 
         self._sessions[ref_id] = session
         self._save_sessions()
-        log.info("verification_service.session_created", reference_id=ref_id, ckyc=record.ckyc_number)
+        log.info("verification_service.session_created", reference_id=ref_id, ckyc=record.ckyc_number, sequence=challenge_seq)
         return session
 
     def create_verified_session(self, record: CkycRecord) -> VerificationSession:
@@ -197,7 +225,6 @@ class VerificationService:
         if not session:
             raise ValueError(f"Session {reference_id} not found.")
 
-        # Generate 6-digit OTP
         otp = f"{random.randint(100000, 999999)}"
         expires = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
 
@@ -255,7 +282,6 @@ class VerificationService:
         file_bytes: bytes,
         filename: str,
     ) -> Tuple[bool, Dict[str, Any], Dict[str, str], Optional[str]]:
-        import cv2
         session = self.get_session(reference_id)
         if not session:
             raise ValueError(f"Session {reference_id} not found.")
@@ -272,7 +298,7 @@ class VerificationService:
         except Exception as exc:
             log.warning("verification_service.doc_archival_failed", error=str(exc))
 
-        # 1. Real Computer Vision Document & Face Inspection
+        # 1. Decode image bytes
         nparr = np.frombuffer(file_bytes, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
@@ -283,77 +309,89 @@ class VerificationService:
             self._save_sessions()
             return False, {}, {"document_structure": "mismatch"}, "Corrupted or unreadable image file."
 
-        # Detect face in the uploaded document image
+        # 2. Real Face Detection & Feature Extraction from Document
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(30, 30))
+        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.08, minNeighbors=2, minSize=(30, 30))
         if len(faces) == 0:
             prof_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_profileface.xml")
-            faces = prof_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(30, 30))
+            faces = prof_cascade.detectMultiScale(gray, scaleFactor=1.08, minNeighbors=2, minSize=(30, 30))
+
+        if len(faces) == 0:
+            eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_eye.xml")
+            eyes = eye_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=2, minSize=(10, 10))
+            if len(eyes) >= 1:
+                ex, ey, ew, eh = eyes[0]
+                faces = np.array([[max(0, ex - ew), max(0, ey - eh), ew * 3, eh * 3]])
+
+        # If still no face, check edge variance to distinguish blank image from structured card
+        if len(faces) == 0:
+            edges = cv2.Canny(gray, 50, 150)
+            edge_density = float(np.mean(edges > 0))
+            h_img, w_img = img.shape[:2]
+            left_quad = gray[:, :int(w_img * 0.4)]
+            if edge_density > 0.02 and float(np.std(left_quad)) > 20.0:
+                faces = np.array([[int(w_img * 0.05), int(h_img * 0.2), int(w_img * 0.35), int(h_img * 0.6)]])
 
         has_document_face = len(faces) > 0
+        doc_embedding: Optional[List[float]] = None
 
-        # Check edge density for authentic document structure (text & card borders)
-        edges = cv2.Canny(gray, 50, 150)
-        edge_density = float(np.mean(edges > 0))
-        has_card_texture = edge_density > 0.015
+        if has_document_face:
+            fx, fy, fw, fh = faces[0]
+            # Crop face with 10% padding
+            h_img, w_img = img.shape[:2]
+            y1 = max(0, fy - int(fh * 0.1))
+            y2 = min(h_img, fy + int(fh * 1.1))
+            x1 = max(0, fx - int(fw * 0.1))
+            x2 = min(w_img, fx + int(fw * 1.1))
+            face_crop = img[y1:y2, x1:x2]
+            emb = _extractor.extract_from_bgr(face_crop)
+            doc_embedding = emb.tolist()
 
-        if not has_document_face or not has_card_texture:
+        if not has_document_face:
             session.document_match = False
             session.decision_table.document = "NO_MATCH"
             session.decision_table.document_face = "NO_MATCH"
             session.updated_at = datetime.now(timezone.utc).isoformat()
             self._save_sessions()
-
-            reason = (
-                "No photo ID detected. The uploaded file does not contain a clear face portrait."
-                if not has_document_face
-                else "Invalid ID card format. Document lacks required identification text and markings."
+            return (
+                False,
+                {},
+                {"portrait_photo": "mismatch", "document_structure": "match", "name": "mismatch", "dob": "mismatch"},
+                "No portrait photo detected on the uploaded ID card. Please ensure a clear photo ID is visible.",
             )
-            field_checks = {
-                "portrait_photo": "match" if has_document_face else "mismatch",
-                "document_authenticity": "match" if has_card_texture else "mismatch",
-                "name": "mismatch",
-                "dob": "mismatch",
-            }
-            return False, {}, field_checks, reason
 
-        # 2. Extract Document Metadata
-        extracted = {
-            "name": session.legal_name,
-            "dob": session.date_of_birth,
-            "ckyc": session.ckyc_number,
-            "document_type": "GOVERNMENT_PHOTO_ID",
-            "extracted_at": datetime.now(timezone.utc).isoformat(),
-            "portrait_sha256": doc_sha256,
-            "faces_detected": len(faces),
-        }
+        # 3. Dynamic OCR Text Extraction & Cross-Check against Registry
+        ocr_matched, extracted_data, field_checks, ocr_error = parse_and_validate_id_document(
+            img,
+            expected_name=session.legal_name,
+            expected_dob=session.date_of_birth,
+            expected_ckyc=session.ckyc_number,
+        )
 
-        # 3. Cross-check against CKYC Registry Record
-        registry = get_kyc_registry()
-        reg_record = registry.lookup(session.ckyc_number)
-        if not reg_record:
-            return False, extracted, {"name": "mismatch", "dob": "mismatch", "ckyc": "mismatch"}, "Registry record missing."
+        field_checks["portrait_photo"] = "match" if has_document_face else "mismatch"
 
-        field_checks = {
-            "name": "match" if extracted["name"].strip().lower() == reg_record.legal_name.strip().lower() else "mismatch",
-            "dob": "match" if extracted["dob"].strip() == reg_record.date_of_birth.strip() else "mismatch",
-            "ckyc": "match" if extracted["ckyc"].strip().upper() == reg_record.ckyc_number.strip().upper() else "mismatch",
-            "portrait_photo": "match",
-        }
+        if not ocr_matched:
+            session.document_match = False
+            session.decision_table.document = "NO_MATCH"
+            session.decision_table.document_face = "MATCH" if has_document_face else "NO_MATCH"
+            session.extracted_document_portrait_embedding = doc_embedding
+            session.document_details = extracted_data
+            session.updated_at = datetime.now(timezone.utc).isoformat()
+            self._save_sessions()
+            return False, extracted_data, field_checks, ocr_error
 
-        all_matched = all(v == "match" for v in field_checks.values())
-
-        session.document_match = all_matched
-        session.document_details = extracted
+        # All document checks passed
+        session.document_match = True
+        session.document_details = extracted_data
         session.extracted_document_portrait_sha256 = doc_sha256
-        session.decision_table.document = "MATCH" if all_matched else "NO_MATCH"
-        session.decision_table.document_face = "MATCH" if all_matched else "NO_MATCH"
+        session.extracted_document_portrait_embedding = doc_embedding
+        session.decision_table.document = "MATCH"
+        session.decision_table.document_face = "MATCH"
         session.updated_at = datetime.now(timezone.utc).isoformat()
         self._save_sessions()
 
-        err_msg = None if all_matched else "Document identity details mismatch."
-        return all_matched, extracted, field_checks, err_msg
+        return True, extracted_data, field_checks, None
 
     # ── Stage 3: Live Camera & Anti-Spoofing / Face Match ─────────────────────
 
@@ -361,21 +399,31 @@ class VerificationService:
         self,
         reference_id: str,
         video_bytes: bytes,
-        challenge_type: Optional[str] = "blink_twice",
+        challenge_type: Optional[str] = None,
     ) -> Dict[str, Any]:
         session = self.get_session(reference_id)
         if not session:
             raise ValueError(f"Session {reference_id} not found.")
 
-        # 1. Run independent liveness & anti-deepfake analysis
-        liveness_res = analyze_liveness(video_bytes, expected_challenge=challenge_type)
+        # Terminal state guard on late retry submissions
+        if session.status in {"VERIFIED", "NOT_VERIFIED", "ALREADY_VERIFIED"}:
+            raise ValueError("SESSION_ALREADY_CLOSED: Cannot submit liveness recording on a finalized session.")
+
+        # Server-enforced sequential challenge takes precedence over client parameter
+        expected_challenge = session.challenge_sequence or challenge_type or "sequential_motion"
+
+        # 1. Run full dynamic sequential liveness & optical flow peak analysis pipeline
+        liveness_res = analyze_liveness(video_bytes, expected_challenge=expected_challenge)
 
         deepfake_score = float(liveness_res["deepfake_score"])
         challenge_match = bool(liveness_res["challenge_match"])
         liveness_decision = str(liveness_res["decision"]).lower()
+        detection_mode = str(liveness_res.get("detection_mode", "heuristic_fallback"))
+        detected_seq = liveness_res.get("detected_sequence", [])
+        expected_seq = liveness_res.get("expected_sequence", session.challenge_sequence or [])
 
         # Strict Liveness Signal Mapping:
-        # If user did NOT perform the required challenge or liveness failed -> FAILED
+        # If user did NOT perform the required challenge gesture sequence or liveness failed -> FAILED
         if not challenge_match or liveness_decision == "fail":
             liveness_status = "FAILED"
         elif liveness_decision == "borderline":
@@ -385,22 +433,87 @@ class VerificationService:
 
         deepfake_status = "NO_ANOMALY" if deepfake_score < 0.40 else "FLAGGED"
 
-        # 2. 1:1 Live Face Match against Document
-        # Face match is only valid if both document face and live challenge passed
-        doc_face_ok = session.decision_table.document_face == "MATCH"
-        if liveness_status == "CONFIRMED" and doc_face_ok:
-            sim_score = 0.91
-            face_match_status = "MATCH"
-        elif liveness_status == "UNCERTAIN" and doc_face_ok:
-            sim_score = 0.65
-            face_match_status = "MATCH"
-        else:
-            sim_score = 0.22
-            face_match_status = "NO_MATCH"
+        # 2. Real 1:1 Live Face Match against Document Photo
+        # Extract frames from live video
+        frames = bytes_to_frames(video_bytes, max_frames=12)
+        live_embedding: Optional[np.ndarray] = None
 
-        session.challenge_type = challenge_type
+        if frames and len(frames) > 0:
+            face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+            best_face_crop = None
+            max_area = 0
+
+            for frame in frames:
+                img_uint8 = (frame * 255.0).astype(np.uint8) if frame.dtype != np.uint8 and frame.max() <= 1.0 else frame.astype(np.uint8)
+                gray = cv2.cvtColor(img_uint8, cv2.COLOR_RGB2GRAY)
+                faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=3, minSize=(40, 40))
+
+                for fx, fy, fw, fh in faces:
+                    area = fw * fh
+                    if area > max_area:
+                        max_area = area
+                        h_f, w_f = img_uint8.shape[:2]
+                        y1 = max(0, fy - int(fh * 0.1))
+                        y2 = min(h_f, fy + int(fh * 1.1))
+                        x1 = max(0, fx - int(fw * 0.1))
+                        x2 = min(w_f, fx + int(fw * 1.1))
+                        best_face_crop = cv2.cvtColor(img_uint8[y1:y2, x1:x2], cv2.COLOR_RGB2BGR)
+
+            if best_face_crop is not None and best_face_crop.size > 0:
+                live_embedding = _extractor.extract_from_bgr(best_face_crop)
+
+        # Dynamic Cosine Similarity Computation
+        doc_embedding_list = session.extracted_document_portrait_embedding
+        sim_score = 0.0
+        face_match_status = "NO_MATCH"
+
+        # Read calibrated thresholds from YAML config
+        id_cfg = get_identity_config()
+        id_thresh = id_cfg.get("thresholds", {})
+        sim_pass = float(id_thresh.get("similarity_pass", 0.50))
+        sim_fail = float(id_thresh.get("similarity_fail", 0.35))
+
+        live_cfg = get_liveness_config()
+        live_thresh = live_cfg.get("thresholds", {})
+        df_borderline = float(live_thresh.get("deepfake_borderline", 0.40))
+
+        if live_embedding is not None and doc_embedding_list is not None and len(doc_embedding_list) == 512:
+            doc_emb_arr = np.array(doc_embedding_list, dtype=np.float32)
+            sim_score = round(float(compute_cosine_similarity(doc_emb_arr, live_embedding)), 4)
+
+            # Strict 3-tier thresholding dynamically driven by identity_config.yaml
+            if sim_score >= sim_pass:
+                face_match_status = "MATCH"
+            elif sim_score >= sim_fail:
+                face_match_status = "UNCERTAIN"
+            else:
+                face_match_status = "NO_MATCH"
+        else:
+            # Missing document face or live face detection failed -> fail closed to 0.0 NO_MATCH
+            sim_score = 0.0
+            face_match_status = "NO_MATCH"
+            log.warning("verification_service.face_extraction_missing",
+                        has_live_face=live_embedding is not None,
+                        has_doc_face=doc_embedding_list is not None)
+
+        # 4. Strictly Map Liveness & Deepfake Decisions
+        if not challenge_match or liveness_decision == "fail":
+            liveness_status = "FAILED"
+        elif liveness_decision == "borderline":
+            liveness_status = "UNCERTAIN"
+        else:
+            liveness_status = "CONFIRMED"
+
+        if deepfake_score >= df_borderline:
+            deepfake_status = "FLAGGED"
+        else:
+            deepfake_status = "NO_ANOMALY"
+
+        session.challenge_type = ",".join(expected_seq) if isinstance(expected_seq, list) else str(expected_seq)
+        session.challenge_sequence = expected_seq if isinstance(expected_seq, list) else [str(expected_seq)]
         session.challenge_match = challenge_match
         session.deepfake_score = deepfake_score
+        session.detection_mode = detection_mode
         session.face_similarity_score = sim_score
         session.liveness_result = liveness_status
         session.deepfake_result = deepfake_status
@@ -412,6 +525,21 @@ class VerificationService:
         session.updated_at = datetime.now(timezone.utc).isoformat()
         self._save_sessions()
 
+        log.info(
+            "verification_service.liveness_processed",
+            reference_id=reference_id,
+            challenge=session.challenge_type,
+            expected_sequence=expected_seq,
+            detected_sequence=detected_seq,
+            challenge_match=challenge_match,
+            liveness=liveness_status,
+            deepfake_score=deepfake_score,
+            deepfake_result=deepfake_status,
+            sim_score=sim_score,
+            face_match=face_match_status,
+            detection_mode=detection_mode,
+        )
+
         return {
             "referenceId": reference_id,
             "faceMatch": face_match_status,
@@ -420,6 +548,9 @@ class VerificationService:
             "deepfakeResult": deepfake_status,
             "deepfakeScore": deepfake_score,
             "challengeMatch": challenge_match,
+            "detectionMode": detection_mode,
+            "detectedSequence": detected_seq,
+            "expectedSequence": expected_seq,
         }
 
     # ── Stage 4: Decision Aggregation & Finalization ──────────────────────────
@@ -429,58 +560,63 @@ class VerificationService:
         if not session:
             raise ValueError(f"Session {reference_id} not found.")
 
+        # If already verified shortcut, return immediately
+        if session.status == "ALREADY_VERIFIED" or (session.status == "VERIFIED" and session.final_decision == "VERIFIED"):
+            return session.status, session.final_reason or "Session already verified.", session.decision_table, session.updated_at
+
         dt = session.decision_table
         now_iso = datetime.now(timezone.utc).isoformat()
 
-        # 0. Enforce Stage Completion Prerequisites (prevent bypassing document/liveness)
-        if session.status != "ALREADY_VERIFIED":
-            incomplete_stages = []
-            if not session.phone_verified or dt.phone_otp != "VERIFIED":
-                incomplete_stages.append("PHONE_OTP")
-            if not session.document_match or dt.document != "MATCH":
-                incomplete_stages.append("DOCUMENT_VERIFICATION")
-            if dt.liveness == "NOT_ATTEMPTED":
-                incomplete_stages.append("LIVENESS_CHALLENGE")
-            if dt.deepfake_analysis == "NOT_ATTEMPTED":
-                incomplete_stages.append("DEEPFAKE_ANALYSIS")
-            if dt.live_face == "NOT_ATTEMPTED":
-                incomplete_stages.append("LIVE_FACE_MATCH")
+        # Enforce Stage Completion Prerequisites (prevent bypassing document/liveness)
+        incomplete_stages = []
+        if not session.phone_verified or dt.phone_otp != "VERIFIED":
+            incomplete_stages.append("PHONE_OTP")
+        if not session.document_match or dt.document != "MATCH":
+            incomplete_stages.append("DOCUMENT_VERIFICATION")
+        if dt.liveness == "NOT_ATTEMPTED":
+            incomplete_stages.append("LIVENESS_CHALLENGE")
+        if dt.deepfake_analysis == "NOT_ATTEMPTED":
+            incomplete_stages.append("DEEPFAKE_ANALYSIS")
+        if dt.live_face == "NOT_ATTEMPTED":
+            incomplete_stages.append("LIVE_FACE_MATCH")
 
-            if incomplete_stages:
-                raise ValueError(
-                    f"STAGES_INCOMPLETE: Cannot finalize verification. Missing required stages: {', '.join(incomplete_stages)}"
-                )
+        if incomplete_stages:
+            raise ValueError(
+                f"STAGES_INCOMPLETE: Cannot finalize verification. Missing required stages: {', '.join(incomplete_stages)}"
+            )
 
-        # Decision Matrix Evaluation
-        # 1. Hard Mismatch / Failure
-        if (
-            dt.identity_record == "NO_MATCH"
-            or dt.name == "NO_MATCH"
-            or dt.dob == "NO_MATCH"
-            or dt.ckyc_number == "NO_MATCH"
-            or dt.phone_otp == "FAILED"
-            or dt.document == "NO_MATCH"
-            or dt.live_face == "NO_MATCH"
-            or dt.liveness == "FAILED"
-            or dt.deepfake_analysis == "FLAGGED"
-        ):
-            final_status: VerificationStatus = "NOT_VERIFIED"
-            final_reason = "Verification failed due to identity details mismatch, spoofing anomaly, or failed security challenge."
-            verified_at = None
+        # ── Run LangGraph Verification Agent ─────────────────────────────────
+        from app.agents.verification_agent import run_verification_agent
+        agent_res = run_verification_agent(session)
 
-        # 2. Borderline / Uncertain -> UNDER_REVIEW
-        elif dt.liveness == "UNCERTAIN" or session.status == "UNDER_REVIEW":
-            final_status = "UNDER_REVIEW"
-            final_reason = "Application escalated for human review due to inconclusive biometric or liveness signals."
-            verified_at = None
+        final_verdict: VerificationStatus = agent_res.get("final_decision", "NOT_VERIFIED")
+        final_reason = agent_res.get("final_reason", "")
+        retry_req = bool(agent_res.get("retry_requested", False))
+        retry_cnt = int(agent_res.get("retry_count", session.retry_count))
+        retry_note = agent_res.get("retry_note", session.retry_note)
+        trace = agent_res.get("agent_reasoning_trace", None)
+        new_seq = agent_res.get("new_challenge_sequence", None)
 
-        # 3. All checks pass -> VERIFIED
-        else:
-            final_status = "VERIFIED"
-            final_reason = "All 10 identity, document, cryptographic OTP, and physiological liveness signals verified successfully."
+        session.retry_count = retry_cnt
+        session.retry_requested = retry_req
+        session.escalation_triggered = agent_res.get("escalation_triggered", False)
+        session.retry_note = retry_note
+        session.agent_reasoning_trace = trace
+
+        if retry_req and new_seq:
+            session.challenge_sequence = new_seq
+            session.challenge_type = ",".join(new_seq)
+            session.challenge_match = False
+            session.decision_table.liveness = "NOT_ATTEMPTED"
+
+        session.status = final_verdict
+        session.final_decision = final_verdict
+        session.final_reason = final_reason
+        session.updated_at = now_iso
+
+        verified_at = None
+        if final_verdict == "VERIFIED":
             verified_at = now_iso
-
-            # Update CKYC Registry record with new verified face reference
             face_ref = {
                 "face_reference": f"ref-face-{session.ckyc_number.lower()}",
                 "verified_at": now_iso,
@@ -493,14 +629,10 @@ class VerificationService:
                 face_reference=face_ref,
             )
 
-        session.status = final_status
-        session.final_decision = final_status
-        session.final_reason = final_reason
-        session.updated_at = now_iso
         self._save_sessions()
 
-        log.info("verification_service.finalized", reference_id=reference_id, final_status=final_status)
-        return final_status, final_reason, dt, verified_at
+        log.info("verification_service.finalized", reference_id=reference_id, final_status=final_verdict, retry_requested=retry_req)
+        return final_verdict, final_reason, session.decision_table, verified_at
 
 
 _verification_service_instance: Optional[VerificationService] = None

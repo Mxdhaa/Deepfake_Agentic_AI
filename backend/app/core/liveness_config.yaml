@@ -35,21 +35,34 @@ thresholds:
   av_sync_fail_ms:       150
 
   # Composite anomaly score bands → final decision
-  anomaly_fail:         0.65
+  anomaly_fail:         0.70
   anomaly_borderline:   0.40
 
-# ── Frame Extraction ──────────────────────────────────────────────────────────
 frame_sampling:
-  max_frames:   16          # subsample long clips; keeps inference fast
+  max_frames:   24          # subsample long clips; provides sufficient temporal resolution for 3-step sequence
   resize:       [224, 224]  # target size for the deepfake detector
 
-# ── Motion Detection ──────────────────────────────────────────────────────────
+# ── Motion & Gesture Detection ───────────────────────────────────────────────
 motion:
   # Minimum mean absolute pixel delta (0–255 scale) between consecutive frames
   # to count as a "motion frame". Tuned for typical 30fps webcam clips.
   min_delta_threshold:  4.0
   # Optical flow magnitude threshold (fallback when frame-delta is insufficient)
-  flow_magnitude_min:   0.8
+  flow_magnitude_min:   0.40
+  # Gesture specific directional flow thresholds
+  turn_dx_min:          0.50
+  nod_dy_min:           0.55
+
+# ── Sequential Head Motion Challenge ─────────────────────────────────────────
+sequential_motion:
+  sequence_length:          3
+  gesture_pool:             ["left", "right", "up", "down"]
+  turn_dx_min:              0.50
+  nod_dy_min:               0.55
+  peak_min_gap_frames:      4
+  min_peak_sustain_frames:  2
+  min_excursion_mag:        0.70
+  flow_magnitude_min:       0.40
 
 # ── Penalty Functions ─────────────────────────────────────────────────────────
 # Penalty values fed into the weighted sum are always clamped to [0.0, 1.0].

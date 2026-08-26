@@ -67,6 +67,9 @@ class LivenessResult(BaseModel):
     processing_time_ms:    float
     frame_count:           int     = Field(ge=0)
     config_version:        str
+    detection_mode:        Optional[str] = "heuristic_fallback"
+    detected_sequence:     Optional[list[str]] = None
+    expected_sequence:     Optional[list[str]] = None
     video_sha256:          str     = Field(
         description=(
             "SHA-256 hex digest of the raw clip bytes as received, computed BEFORE "
@@ -179,7 +182,7 @@ async def analyze(
     # Scoring may fail — that's OK, the clip is already archived (Steps 1-3 done).
     # A scoring failure returns HTTP 500 but does NOT delete the stored clip.
     try:
-        result = analyze_liveness(clip_bytes)
+        result = analyze_liveness(clip_bytes, expected_challenge=challenge_type)
     except Exception as exc:
         log.error("liveness.analyze.failed", session_id=session_id, error=str(exc))
         raise HTTPException(
@@ -225,6 +228,9 @@ async def analyze(
         processing_time_ms=elapsed_ms,
         frame_count=result["frame_count"],
         config_version=result["config_version"],
+        detection_mode=result.get("detection_mode", "heuristic_fallback"),
+        detected_sequence=result.get("detected_sequence", []),
+        expected_sequence=result.get("expected_sequence", []),
         video_sha256=video_sha256,
     )
 

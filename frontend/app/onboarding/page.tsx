@@ -30,26 +30,20 @@ import {
 } from "@/lib/api";
 import { useCamera } from "@/hooks/useCamera";
 
-const LIVENESS_CHALLENGES = [
-  { id: "blink_twice", label: "Blink twice slowly", instruction: "Look directly at the camera and blink your eyes twice slowly.", icon: "👁️" },
-  { id: "turn_left", label: "Turn head to the left", instruction: "Slowly turn your head toward the left and return to center.", icon: "⬅️" },
-  { id: "turn_right", label: "Turn head to the right", instruction: "Slowly turn your head toward the right and return to center.", icon: "➡️" },
-  { id: "nod_head", label: "Nod your head up and down", instruction: "Gently nod your head up and down twice.", icon: "↕️" },
-  { id: "tilt_head", label: "Tilt your head sideways", instruction: "Tilt your head slightly toward your shoulder and return.", icon: "🔄" },
-  { id: "smile", label: "Give a natural smile", instruction: "Smile naturally at the camera for a moment.", icon: "😊" },
-  { id: "raise_eyebrows", label: "Raise your eyebrows", instruction: "Raise your eyebrows briefly and relax.", icon: "👀" },
-  { id: "look_up", label: "Look slightly upward", instruction: "Look toward the top of the screen, then back to center.", icon: "⬆️" },
-  { id: "slow_circle", label: "Gentle head roll", instruction: "Make a subtle, slow circular movement with your head.", icon: "🌀" },
-  { id: "turn_and_blink", label: "Turn slightly and blink", instruction: "Turn your head slightly to the side and blink once.", icon: "✨" },
-];
+const GESTURE_INFO: Record<string, { label: string; instruction: string; icon: string }> = {
+  left: { label: "Turn Left", instruction: "Turn head left and return to center.", icon: "⬅️" },
+  right: { label: "Turn Right", instruction: "Turn head right and return to center.", icon: "➡️" },
+  up: { label: "Look Up", instruction: "Tilt head upward and return to center.", icon: "⬆️" },
+  down: { label: "Nod Down", instruction: "Tilt head downward and return to center.", icon: "⬇️" },
+};
 
 export default function OnboardingPage() {
   const [step, setStep] = useState<"details" | "otp" | "document" | "liveness" | "processing" | "result">("details");
 
-  // Form State (Seed defaults for test convenience)
-  const [legalName, setLegalName] = useState("Aarav Sharma");
-  const [dateOfBirth, setDateOfBirth] = useState("1994-05-14");
-  const [ckycNumber, setCkycNumber] = useState("CKYC-10001");
+  // Form State (Clean defaults for real applicants)
+  const [legalName, setLegalName] = useState("");
+  const [dateOfBirth, setDateOfBirth] = useState("");
+  const [ckycNumber, setCkycNumber] = useState("");
   const [referenceId, setReferenceId] = useState<string>("");
   const [maskedPhone, setMaskedPhone] = useState<string>("");
   const [otpInput, setOtpInput] = useState<string>("");
@@ -60,15 +54,11 @@ export default function OnboardingPage() {
   const [docFile, setDocFile] = useState<File | null>(null);
   const [documentResult, setDocumentResult] = useState<any>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [retryNotice, setRetryNotice] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Dynamic 10-Challenge state
-  const [challengeIndex, setChallengeIndex] = useState(0);
-  const currentChallenge = LIVENESS_CHALLENGES[challengeIndex];
-
-  const cycleChallenge = () => {
-    setChallengeIndex((prev) => (prev + 1) % LIVENESS_CHALLENGES.length);
-  };
+  // Server-generated Sequential Challenge State
+  const [challengeSequence, setChallengeSequence] = useState<string[]>(["left", "up", "right"]);
 
   // Dedicated Hardware Camera Hook with automatic track cleanup
   const {
@@ -98,6 +88,9 @@ export default function OnboardingPage() {
             setReferenceId(state.referenceId);
             setLegalName(state.legalName);
             setCkycNumber(state.ckycNumber);
+            if (state.challengeSequence && state.challengeSequence.length > 0) {
+              setChallengeSequence(state.challengeSequence);
+            }
 
             if (state.status === "VERIFIED" || state.status === "NOT_VERIFIED" || state.status === "UNDER_REVIEW" || state.status === "ALREADY_VERIFIED") {
               setStep("result");
@@ -118,8 +111,6 @@ export default function OnboardingPage() {
   useEffect(() => {
     if (step === "liveness") {
       startCamera();
-      const randomIdx = Math.floor(Math.random() * LIVENESS_CHALLENGES.length);
-      setChallengeIndex(randomIdx);
     } else {
       stopCamera();
     }
@@ -140,6 +131,9 @@ export default function OnboardingPage() {
 
       setReferenceId(res.referenceId);
       sessionStorage.setItem("cp_reference_id", res.referenceId);
+      if (res.challengeSequence && res.challengeSequence.length > 0) {
+        setChallengeSequence(res.challengeSequence);
+      }
 
       // CHANGE 1: Already-verified shortcut
       if (res.status === "ALREADY_VERIFIED") {
@@ -256,13 +250,25 @@ export default function OnboardingPage() {
     setErrorMsg(null);
 
     try {
-      // 1. Submit Liveness recording
+      // 1. Submit Liveness recording (server verifies against stored challengeSequence)
       if (recordedBlob) {
-        await submitVerificationLiveness(referenceId, recordedBlob, currentChallenge.id);
+        await submitVerificationLiveness(referenceId, recordedBlob);
       }
 
       // 2. Finalize verification & aggregate 10-signal decision
       const finalRes = await finalizeVerification(referenceId);
+
+      // Check if LangGraph agent triggered a one-time challenge retry
+      if (finalRes.retryRequested && finalRes.challengeSequence) {
+        setChallengeSequence(finalRes.challengeSequence);
+        setRecordedBlob(null);
+        setRetryNotice(
+          finalRes.retryNote ||
+            "Borderline biometric signals detected. A one-time retry challenge sequence has been generated. Please follow the new motion sequence."
+        );
+        setStep("liveness");
+        return;
+      }
 
       // 3. Refresh full session state
       const state = await getVerificationStatus(referenceId);
@@ -287,6 +293,7 @@ export default function OnboardingPage() {
     setDocFile(null);
     setOtpInput("");
     setDemoOtp(null);
+    setRetryNotice(null);
     setStep("details");
   };
 
@@ -388,44 +395,11 @@ export default function OnboardingPage() {
           >
             <div>
               <h3 style={{ fontSize: "1.1rem", fontWeight: 600, color: "#FFFFFF", marginBottom: "0.35rem" }}>
-                Applicant Registry Lookup
+                Identity Registration & Verification
               </h3>
               <p style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
-                Enter your exact legal name, date of birth, and Central KYC identifier.
+                Enter your full legal name, date of birth, and identity number as they appear on your government photo ID.
               </p>
-            </div>
-
-            {/* Seed test ID helper badges */}
-            <div style={{ background: "rgba(255,255,255,0.03)", padding: "10px 12px", borderRadius: "6px", border: "1px solid var(--border-color)" }}>
-              <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginBottom: "6px" }}>⚡ Quick Test Identifiers:</div>
-              <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                {[
-                  { label: "Aarav Sharma (New)", ckyc: "CKYC-10001", dob: "1994-05-14", name: "Aarav Sharma" },
-                  { label: "Priya Patel (New)", ckyc: "CKYC-10002", dob: "1997-08-22", name: "Priya Patel" },
-                  { label: "Vikram Malhotra (Already Verified)", ckyc: "CKYC-10003", dob: "1991-11-03", name: "Vikram Malhotra" },
-                ].map((item) => (
-                  <button
-                    key={item.ckyc}
-                    type="button"
-                    onClick={() => {
-                      setLegalName(item.name);
-                      setDateOfBirth(item.dob);
-                      setCkycNumber(item.ckyc);
-                    }}
-                    style={{
-                      background: "rgba(47, 128, 255, 0.1)",
-                      border: "1px solid rgba(47, 128, 255, 0.3)",
-                      color: "#93c5fd",
-                      borderRadius: "4px",
-                      padding: "4px 8px",
-                      fontSize: "0.7rem",
-                      cursor: "pointer",
-                    }}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
             </div>
 
             <div>
@@ -437,7 +411,7 @@ export default function OnboardingPage() {
                 required
                 value={legalName}
                 onChange={(e) => setLegalName(e.target.value)}
-                placeholder="e.g. Aarav Sharma"
+                placeholder="e.g. Medha Kumar"
                 style={{
                   width: "100%",
                   background: "#000000",
@@ -457,10 +431,11 @@ export default function OnboardingPage() {
                   Date of Birth
                 </label>
                 <input
-                  type="date"
+                  type="text"
                   required
                   value={dateOfBirth}
                   onChange={(e) => setDateOfBirth(e.target.value)}
+                  placeholder="YYYY-MM-DD (e.g. 2005-02-14)"
                   style={{
                     width: "100%",
                     background: "#000000",
@@ -732,46 +707,81 @@ export default function OnboardingPage() {
               </p>
             </div>
 
-            {/* Interactive Dynamic Challenge Card */}
+            {retryNotice && (
+              <div
+                style={{
+                  background: "rgba(245, 158, 11, 0.12)",
+                  border: "1px solid rgba(245, 158, 11, 0.4)",
+                  borderRadius: "6px",
+                  padding: "12px 14px",
+                  fontSize: "0.85rem",
+                  color: "#fbbf24",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                }}
+              >
+                <span>⚠️</span>
+                <div>
+                  <strong>Challenge Retry Active:</strong> {retryNotice}
+                </div>
+              </div>
+            )}
+
+            {/* Interactive Dynamic Sequential Challenge Card */}
             <div
               style={{
                 background: "rgba(47, 128, 255, 0.08)",
                 border: "1px solid rgba(47, 128, 255, 0.35)",
                 borderRadius: "6px",
-                padding: "1rem 1.25rem",
+                padding: "1.25rem",
                 display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                flexWrap: "wrap",
-                gap: "0.75rem",
+                flexDirection: "column",
+                gap: "1rem",
               }}
             >
-              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                <span style={{ fontSize: "1.6rem" }}>{currentChallenge.icon}</span>
-                <div>
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                    <span className="tech-pill" style={{ padding: "2px 8px", fontSize: "0.65rem" }}>
-                      REQUIRED ACTION
-                    </span>
-                    <strong style={{ fontSize: "0.95rem", color: "#FFFFFF" }}>{currentChallenge.label}</strong>
-                  </div>
-                  <p style={{ fontSize: "0.8rem", color: "var(--text-readable)", marginTop: "4px" }}>
-                    {currentChallenge.instruction}
-                  </p>
-                </div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem" }}>
+                <span className="tech-pill" style={{ padding: "2px 8px", fontSize: "0.65rem", color: "#2F80FF", borderColor: "rgba(47, 128, 255, 0.4)" }}>
+                  RANDOMIZED SEQUENTIAL CHALLENGE ({challengeSequence.length} STEPS)
+                </span>
+                <span style={{ fontSize: "0.75rem", color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
+                  Perform in exact chronological order
+                </span>
               </div>
 
-              {!isRecording && !recordedBlob && (
-                <button
-                  type="button"
-                  onClick={cycleChallenge}
-                  className="btn-secondary"
-                  style={{ padding: "4px 10px", fontSize: "0.75rem" }}
-                  title="Switch to a different challenge"
-                >
-                  Different challenge ↻
-                </button>
-              )}
+              {/* Step Badges */}
+              <div style={{ display: "grid", gridTemplateColumns: `repeat(${challengeSequence.length}, 1fr)`, gap: "0.75rem" }}>
+                {challengeSequence.map((stepKey, idx) => {
+                  const info = GESTURE_INFO[stepKey.toLowerCase()] || { label: stepKey, instruction: `Move ${stepKey}`, icon: "🔄" };
+                  return (
+                    <div
+                      key={idx}
+                      style={{
+                        background: "rgba(255, 255, 255, 0.03)",
+                        border: "1px solid rgba(255, 255, 255, 0.1)",
+                        borderRadius: "6px",
+                        padding: "0.75rem",
+                        textAlign: "center",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        gap: "4px",
+                      }}
+                    >
+                      <span style={{ fontSize: "0.65rem", color: "#2F80FF", fontWeight: 700, fontFamily: "var(--font-mono)" }}>
+                        STEP {idx + 1}
+                      </span>
+                      <span style={{ fontSize: "1.5rem" }}>{info.icon}</span>
+                      <strong style={{ fontSize: "0.85rem", color: "#FFFFFF" }}>{info.label}</strong>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <p style={{ fontSize: "0.8rem", color: "var(--text-readable)", margin: 0, textAlign: "center" }}>
+                👉 Look directly at the camera, then perform smoothly in order:{" "}
+                {challengeSequence.map((s, i) => `${i + 1}. ${(GESTURE_INFO[s.toLowerCase()]?.label || s)}`).join(" ➔ ")}
+              </p>
             </div>
 
             {/* Video Box */}
@@ -855,7 +865,10 @@ export default function OnboardingPage() {
                       boxShadow: "0 0 15px rgba(47, 128, 255, 0.3)",
                     }}
                   >
-                    Action Challenge: <strong style={{ color: "#2F80FF" }}>{currentChallenge.label}</strong>
+                    Required Sequence:{" "}
+                    <strong style={{ color: "#2F80FF" }}>
+                      {challengeSequence.map((s, i) => `${i + 1}. ${(GESTURE_INFO[s.toLowerCase()]?.label || s)} ${GESTURE_INFO[s.toLowerCase()]?.icon || ""}`).join(" ➔ ")}
+                    </strong>
                   </div>
                 </>
               )}

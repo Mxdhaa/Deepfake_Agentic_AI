@@ -53,6 +53,21 @@ _INDIAN_LAST_NAMES = [
 ]
 
 
+def _normalize_dob(dob_str: str) -> str:
+    """Normalize DD-MM-YYYY, DD/MM/YYYY, YYYY/MM/DD, or YYYY-MM-DD to YYYY-MM-DD."""
+    clean = dob_str.strip().replace("/", "-")
+    parts = clean.split("-")
+    if len(parts) == 3:
+        try:
+            if len(parts[0]) == 4:  # YYYY-MM-DD
+                return f"{int(parts[0]):04d}-{int(parts[1]):02d}-{int(parts[2]):02d}"
+            elif len(parts[2]) == 4:  # DD-MM-YYYY
+                return f"{int(parts[2]):04d}-{int(parts[1]):02d}-{int(parts[0]):02d}"
+        except ValueError:
+            pass
+    return clean
+
+
 class KycRegistryService:
     def __init__(self, storage_path: Path = _REGISTRY_FILE) -> None:
         self._path = storage_path
@@ -73,6 +88,7 @@ class KycRegistryService:
 
         # Deterministic primary test records
         primary_records = [
+            ("CKYC-20050214", "Medha Kumar", "2005-02-14", "+91 9876501402", "NOT_STARTED"),
             ("CKYC-10001", "Aarav Sharma", "1994-05-14", "+91 9876543210", "NOT_STARTED"),
             ("CKYC-10002", "Priya Patel", "1997-08-22", "+91 9812345678", "NOT_STARTED"),
             ("CKYC-10003", "Vikram Malhotra", "1991-11-03", "+91 9765432109", "VERIFIED"),
@@ -168,12 +184,66 @@ class KycRegistryService:
 
         clean_req_name = " ".join(legal_name.strip().lower().split())
         clean_rec_name = " ".join(record.legal_name.strip().lower().split())
-        clean_req_dob = date_of_birth.strip()
-        clean_rec_dob = record.date_of_birth.strip()
+        clean_req_dob = _normalize_dob(date_of_birth)
+        clean_rec_dob = _normalize_dob(record.date_of_birth)
 
         if clean_req_name == clean_rec_name and clean_req_dob == clean_rec_dob:
             return record
         return None
+
+    def upsert_applicant(
+        self,
+        ckyc_number: str,
+        legal_name: str,
+        date_of_birth: str,
+        phone: Optional[str] = None,
+        verification_status: VerificationStatus = "PENDING",
+    ) -> CkycRecord:
+        """Create or update a CKYC applicant record in storage seamlessly."""
+        clean_ckyc = ckyc_number.strip().upper()
+        norm_dob = _normalize_dob(date_of_birth)
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        record = self._records.get(clean_ckyc)
+        if record:
+            record.legal_name = legal_name.strip()
+            record.date_of_birth = norm_dob
+            record.verification_status = verification_status
+            record.updated_at = now_iso
+            if phone:
+                record.registered_phone = phone
+        else:
+            record = CkycRecord(
+                ckyc_number=clean_ckyc,
+                legal_name=legal_name.strip(),
+                date_of_birth=norm_dob,
+                registered_phone=phone or "+91 9876500000",
+                registered_face_reference=None,
+                verification_status=verification_status,
+                created_at=now_iso,
+                updated_at=now_iso,
+            )
+
+        self._records[clean_ckyc] = record
+        self._save_records()
+        log.info("kyc_registry.applicant_upserted", ckyc=clean_ckyc, legal_name=legal_name, status=verification_status)
+        return record
+
+    def create_applicant(
+        self,
+        ckyc_number: str,
+        legal_name: str,
+        date_of_birth: str,
+        phone: Optional[str] = None,
+        verification_status: VerificationStatus = "PENDING",
+    ) -> CkycRecord:
+        return self.upsert_applicant(
+            ckyc_number=ckyc_number,
+            legal_name=legal_name,
+            date_of_birth=date_of_birth,
+            phone=phone,
+            verification_status=verification_status,
+        )
 
     def update_verification_status(
         self,

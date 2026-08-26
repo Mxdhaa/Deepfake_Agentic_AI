@@ -1,4 +1,6 @@
-"""Agent package."""
+"""
+app.agents — Verification and Investigation LangGraph Agents
+"""
 
 from app.agents.verification_agent import (
     VerificationAgentState,

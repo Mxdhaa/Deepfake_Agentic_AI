@@ -133,6 +133,8 @@ def _map_verification_session_to_case(session: Any) -> Dict[str, Any]:
         f"Liveness={session.decision_table.liveness}, Deepfake={session.decision_table.deepfake_analysis}"
     )
 
+    trace = getattr(session, "agent_reasoning_trace", None)
+
     return {
         "case_id": session.reference_id,
         "session_id": session.reference_id,
@@ -148,7 +150,11 @@ def _map_verification_session_to_case(session: Any) -> Dict[str, Any]:
         "decision": decision,
         "agent_recommendation": recommendation,
         "dossier_summary": dossier,
-        "tool_calls_trace": [],
+        "tool_calls_trace": [trace] if trace else [],
+        "agent_reasoning_trace": trace,
+        "retry_count": getattr(session, "retry_count", 0),
+        "retry_requested": getattr(session, "retry_requested", False),
+        "retry_note": getattr(session, "retry_note", None),
         "signals": {
             "deepfake_score": getattr(session, "deepfake_score", 0.08),
             "cosine_similarity_score": getattr(session, "face_similarity_score", 0.91),
@@ -191,18 +197,19 @@ def list_pending_cases(
                     except Exception:
                         pass
 
-    # 2. Bridge all sessions from VerificationService (verification_sessions.json)
-    try:
-        from app.services.verification_service import get_verification_service
-        v_service = get_verification_service()
-        for session in v_service._sessions.values():
-            if session.reference_id not in seen_ids:
-                mapped = _map_verification_session_to_case(session)
-                if status is None or status.lower() in {"all", "*"} or mapped.get("status") == status:
-                    cases.append(mapped)
-                    seen_ids.add(session.reference_id)
-    except Exception as exc:
-        log.warning("review_queue.bridge_sessions_failed", error=str(exc))
+    # 2. Bridge all sessions from VerificationService (verification_sessions.json) only for default production queue
+    if queue_path is None and not os.getenv("REVIEW_QUEUE_PATH"):
+        try:
+            from app.services.verification_service import get_verification_service
+            v_service = get_verification_service()
+            for session in v_service._sessions.values():
+                if session.reference_id not in seen_ids:
+                    mapped = _map_verification_session_to_case(session)
+                    if status is None or status.lower() in {"all", "*"} or mapped.get("status") == status:
+                        cases.append(mapped)
+                        seen_ids.add(session.reference_id)
+        except Exception as exc:
+            log.warning("review_queue.bridge_sessions_failed", error=str(exc))
 
     # Sort descending by creation date
     cases.sort(key=lambda x: x.get("created_at", ""), reverse=True)
@@ -301,7 +308,7 @@ def resolve_case(
 
     if target_case is None:
         # Construct resolved representation from session
-        target_case = get_case(case_id)
+        target_case = get_case(case_id, queue_path=queue_path)
         if target_case is None:
             raise KeyError(f"Case {case_id!r} not found.")
         target_case["status"] = new_status
@@ -311,15 +318,31 @@ def resolve_case(
         target_case["notes"] = notes or ""
 
     # Step 4: Seal into unified cryptographic hash chain
-    from app.services.audit import log_human_review_event
-    log_human_review_event(
-        case_id=target_case["case_id"],
-        session_id=target_case["session_id"],
-        reviewer_id=reviewer_id,
-        action=act,
-        notes=notes or "",
-        ip=ip,
+    from app.services.audit import (
+        get_latest_agent_decision_hash,
+        log_human_review_event,
+        log_reviewer_decision_event,
     )
+    
+    parent_hash = get_latest_agent_decision_hash(target_case["session_id"])
+    if parent_hash:
+        log_reviewer_decision_event(
+            session_id=target_case["session_id"],
+            reviewer_id=reviewer_id,
+            verdict="VERIFIED" if act == "approve" else "NOT_VERIFIED",
+            note=notes or "",
+            parent_decision_hash=parent_hash,
+            ip=ip,
+        )
+    else:
+        log_human_review_event(
+            case_id=target_case["case_id"],
+            session_id=target_case["session_id"],
+            reviewer_id=reviewer_id,
+            action=act,
+            notes=notes or "",
+            ip=ip,
+        )
 
     log.info(
         "review_queue.resolved",

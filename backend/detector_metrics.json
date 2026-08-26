@@ -1,67 +1,57 @@
 {
-  "architecture": "resnet18",
-  "training_time_seconds": 154.03,
-  "best_epoch": 3,
-  "test_samples": 40,
-  "test_loss": 0.2771,
-  "test_auc": 0.9733,
-  "optimal_threshold_youden_j": 0.9116,
-  "metrics_at_optimal_threshold": {
-    "accuracy": 0.925,
-    "precision": 0.8333,
-    "recall": 1.0,
-    "f1_score": 0.9091
-  },
-  "confusion_matrix": [
-    [
-      22,
-      3
-    ],
-    [
-      0,
-      15
-    ]
+  "architecture": "ResNet18_Binary_Deepfake_Classifier",
+  "dataset": "FaceForensics++ (FF++) C23 Multi-Method Dataset",
+  "methods_included": [
+    "ffpp_c23_original",
+    "ffpp_c23_FaceShifter",
+    "ffpp_c23_DeepFakeDetection",
+    "ffpp_c23_Deepfakes",
+    "ffpp_c23_FaceSwap",
+    "ffpp_c23_Face2Face",
+    "ffpp_c23_NeuralTextures"
   ],
-  "roc_curve": {
-    "fpr": [
-      0.0,
-      0.0,
-      0.0,
-      0.04,
-      0.04,
-      0.12,
-      0.12,
-      1.0
-    ],
-    "tpr": [
-      0.0,
-      0.0667,
-      0.7333,
-      0.7333,
-      0.8,
-      0.8,
-      1.0,
-      1.0
-    ]
-  },
-  "history": [
-    {
-      "epoch": 1,
-      "train_loss": 0.48195395861448864,
-      "val_loss": 1.0797389713493553,
-      "val_auc": 0.9099378881987578
-    },
-    {
-      "epoch": 2,
-      "train_loss": 0.31414233516441303,
-      "val_loss": 0.5113177974079106,
-      "val_auc": 0.8913043478260869
-    },
-    {
-      "epoch": 3,
-      "train_loss": 0.24597199411874407,
-      "val_loss": 0.3353087217421145,
-      "val_auc": 0.937888198757764
+  "total_frames_extracted": 10151,
+  "train_samples": 7105,
+  "val_samples": 1521,
+  "test_samples": 1525,
+  "best_val_accuracy": 0.9638,
+  "test_metrics": {
+    "loss": 0.1602,
+    "accuracy": 0.9541,
+    "precision": 0.918,
+    "recall": 0.9932,
+    "f1_score": 0.9541,
+    "total_samples": 1525,
+    "by_source": {
+      "ffpp_c23_DeepFakeDetection": {
+        "accuracy": 0.9947,
+        "samples": 188
+      },
+      "ffpp_c23_Deepfakes": {
+        "accuracy": 1.0,
+        "samples": 104
+      },
+      "ffpp_c23_Face2Face": {
+        "accuracy": 0.9922,
+        "samples": 128
+      },
+      "ffpp_c23_FaceShifter": {
+        "accuracy": 1.0,
+        "samples": 134
+      },
+      "ffpp_c23_FaceSwap": {
+        "accuracy": 1.0,
+        "samples": 84
+      },
+      "ffpp_c23_NeuralTextures": {
+        "accuracy": 0.9684,
+        "samples": 95
+      },
+      "ffpp_c23_original": {
+        "accuracy": 0.9179,
+        "samples": 792
+      }
     }
-  ]
+  },
+  "trained_at": "2026-08-24 18:54:08Z"
 }

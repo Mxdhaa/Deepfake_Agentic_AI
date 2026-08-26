@@ -327,6 +327,91 @@ def log_investigation_event(
     )
 
 
+def log_agent_retry_event(
+    *,
+    session_id: str,
+    retry_count: int,
+    borderline_reasons: List[str],
+    retry_note: str,
+    new_challenge_sequence: List[str],
+    raw_signals: Dict[str, Any],
+    ip: str = "unknown",
+) -> AuditEntry:
+    """
+    Record an immediate agentic retry escalation event into the unified hash chain.
+    """
+    return seal_record(
+        record_type="agent_retry_requested",
+        session_id=session_id,
+        payload={
+            "retry_count": retry_count,
+            "borderline_reasons": borderline_reasons,
+            "retry_note": retry_note,
+            "new_challenge_sequence": new_challenge_sequence,
+            "raw_signals": raw_signals,
+            "ip": ip,
+        },
+    )
+
+
+def log_agent_decision_event(
+    *,
+    session_id: str,
+    final_decision: str,
+    final_reason: str,
+    agent_classification: str,
+    has_hard_fail: bool,
+    is_borderline: bool,
+    agent_reasoning_trace: Dict[str, Any],
+    raw_signals: Dict[str, Any],
+    decision_table: Dict[str, Any],
+    ip: str = "unknown",
+) -> AuditEntry:
+    """
+    Record the LangGraph agent final reasoning and classification event into the unified hash chain.
+    """
+    return seal_record(
+        record_type="agent_decision",
+        session_id=session_id,
+        payload={
+            "final_decision": final_decision,
+            "final_reason": final_reason,
+            "agent_classification": agent_classification,
+            "has_hard_fail": has_hard_fail,
+            "is_borderline": is_borderline,
+            "agent_reasoning_trace": agent_reasoning_trace,
+            "raw_signals": raw_signals,
+            "decision_table": decision_table,
+            "ip": ip,
+        },
+    )
+
+
+def log_reviewer_decision_event(
+    *,
+    session_id: str,
+    reviewer_id: str,
+    verdict: str,
+    note: str = "",
+    parent_decision_hash: Optional[str] = None,
+    ip: str = "unknown",
+) -> AuditEntry:
+    """
+    Record Human-In-The-Loop reviewer decision linked cryptographically to the parent agent_decision hash.
+    """
+    return seal_record(
+        record_type="reviewer_decision",
+        session_id=session_id,
+        payload={
+            "reviewer_id": reviewer_id,
+            "verdict": verdict,
+            "note": note,
+            "parent_decision_hash": parent_decision_hash or "none",
+            "ip": ip,
+        },
+    )
+
+
 def log_human_review_event(
     *,
     case_id: str,
@@ -337,7 +422,7 @@ def log_human_review_event(
     ip: str = "unknown",
 ) -> AuditEntry:
     """
-    Record Stage 4 human review decision into the unified hash chain.
+    Record Stage 4 human review resolution into the unified hash chain.
     """
     return seal_record(
         record_type="human_review",
@@ -350,6 +435,27 @@ def log_human_review_event(
             "ip": ip,
         },
     )
+
+
+def get_latest_agent_decision_hash(session_id: str, chain_path: Optional[Path | str] = None) -> Optional[str]:
+    """Retrieve the record_hash of the most recent agent_decision event for a session."""
+    path = Path(chain_path) if chain_path else get_audit_chain_path()
+    if not path.exists() or path.stat().st_size == 0:
+        return None
+
+    last_hash = None
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+                if entry.get("session_id") == session_id and entry.get("record_type") == "agent_decision":
+                    last_hash = entry.get("record_hash")
+            except Exception:
+                continue
+    return last_hash
 
 
 # ─── Chain Verification ───────────────────────────────────────────────────────

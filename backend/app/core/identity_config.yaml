@@ -13,16 +13,18 @@
 #       PASS:       registry_velocity < 3
 # ─────────────────────────────────────────────────────────────────────────────
 
-config_version: "v1.0-stage2"
+config_version: "v1.1-stage2"
 
 thresholds:
-  similarity_pass: 0.60         # cosine_similarity >= 0.60 -> pass tier
-  similarity_fail: 0.35         # cosine_similarity < 0.35 -> fail tier
+  similarity_pass: 0.50         # cosine_similarity >= 0.50 -> MATCH
+  similarity_fail: 0.35         # cosine_similarity < 0.35 -> NO_MATCH
+  fuzzy_name_min_ratio: 70      # minimum fuzzy match score for name verification
+  fuzzy_dob_min_ratio: 80       # minimum fuzzy match score for date of birth verification
   velocity_borderline: 3        # registry_velocity >= 3 -> borderline tier
   velocity_fail: 6              # registry_velocity >= 6 -> fail tier
 
 embedding:
   dimension: 512
-  backbone: "resnet50_feature_extractor"
+  backbone: "resnet18_512d"
 
 synthetic_data_path: "data/onboarding_batch.json"

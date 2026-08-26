@@ -143,17 +143,28 @@ def test_otp_expiry():
     assert "expired" in exp_resp.json()["message"].lower()
 
 
-def _create_test_document_with_face() -> bytes:
-    ffpp_imgs = list((Path(__file__).parent.parent / "data" / "ffpp_subset" / "processed_images").glob("*.jpg"))
-    if ffpp_imgs:
-        return ffpp_imgs[0].read_bytes()
-    img = np.zeros((300, 450, 3), dtype=np.uint8)
-    img[:, :] = (240, 240, 240)
-    cv2.ellipse(img, (120, 150), (60, 80), 0, 0, 360, (180, 180, 180), -1)
-    cv2.circle(img, (100, 130), 8, (50, 50, 50), -1)
-    cv2.circle(img, (140, 130), 8, (50, 50, 50), -1)
-    for y in range(80, 240, 30):
-        cv2.rectangle(img, (220, y), (400, y + 12), (70, 70, 70), -1)
+def _create_test_document_with_face(name: str = "ROHAN REDDY", dob: str = "1993-09-30", ckyc: str = "CKYC-10005") -> bytes:
+    img = np.ones((350, 550, 3), dtype=np.uint8) * 255
+    # Card border
+    cv2.rectangle(img, (10, 10), (540, 340), (40, 40, 40), 2)
+    # Header
+    cv2.rectangle(img, (10, 10), (540, 50), (47, 128, 255), -1)
+    cv2.putText(img, "GOVERNMENT IDENTITY CARD", (80, 38), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+    # Face portrait area
+    cv2.rectangle(img, (30, 80), (170, 260), (200, 200, 200), -1)
+    # Draw face
+    cv2.ellipse(img, (100, 150), (40, 50), 0, 0, 360, (180, 160, 140), -1)
+    cv2.circle(img, (85, 140), 4, (40, 40, 40), -1)
+    cv2.circle(img, (115, 140), 4, (40, 40, 40), -1)
+    cv2.line(img, (85, 175), (115, 175), (120, 40, 40), 2)
+
+    # Text details
+    cv2.putText(img, f"NAME: {name}", (190, 110), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 0), 2)
+    cv2.putText(img, f"DOB: {dob}", (190, 160), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 0), 2)
+    cv2.putText(img, f"ID: {ckyc}", (190, 210), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 0), 2)
+    cv2.putText(img, "VERIFIED CITIZEN", (190, 260), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (100, 100, 100), 1)
+
     _, buf = cv2.imencode(".jpg", img)
     return buf.tobytes()
 
@@ -177,7 +188,11 @@ def test_document_without_face_rejected():
     )
     assert doc_resp.status_code == 400
     assert doc_resp.json()["documentMatch"] is False
-    assert "no photo id detected" in doc_resp.json()["message"].lower() or "invalid" in doc_resp.json()["message"].lower()
+    assert (
+        "no photo id detected" in doc_resp.json()["message"].lower()
+        or "no portrait photo" in doc_resp.json()["message"].lower()
+        or "invalid" in doc_resp.json()["message"].lower()
+    )
 
 
 def test_document_field_mismatches():
@@ -214,7 +229,7 @@ def test_liveness_uncertain_leads_to_under_review():
     # Verify OTP & Document
     otp_resp = client.post(f"/api/v1/verification/{ref_id}/otp/send")
     client.post(f"/api/v1/verification/{ref_id}/otp/verify", json={"otp": otp_resp.json()["demoOtp"]})
-    doc_bytes = _create_test_document_with_face()
+    doc_bytes = _create_test_document_with_face(name="ANANYA VERMA", dob="1999-02-18", ckyc="CKYC-10004")
     client.post(f"/api/v1/verification/{ref_id}/document", files={"document": ("id.jpg", doc_bytes, "image/jpeg")})
 
     # Simulate completed liveness stage with UNCERTAIN result

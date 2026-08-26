@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 VerificationStatus = Literal[
     "NOT_STARTED",
+    "PENDING",
     "IN_PROGRESS",
     "UNDER_REVIEW",
     "VERIFIED",
@@ -53,7 +54,7 @@ class DecisionTable(BaseModel):
     phone_otp: Literal["VERIFIED", "FAILED", "NOT_ATTEMPTED"] = "NOT_ATTEMPTED"
     document: Literal["MATCH", "NO_MATCH", "NOT_ATTEMPTED"] = "NOT_ATTEMPTED"
     document_face: Literal["MATCH", "NO_MATCH", "NOT_ATTEMPTED"] = "NOT_ATTEMPTED"
-    live_face: Literal["MATCH", "NO_MATCH", "NOT_ATTEMPTED"] = "NOT_ATTEMPTED"
+    live_face: Literal["MATCH", "UNCERTAIN", "NO_MATCH", "NOT_ATTEMPTED"] = "NOT_ATTEMPTED"
     liveness: Literal["CONFIRMED", "UNCERTAIN", "FAILED", "NOT_ATTEMPTED"] = "NOT_ATTEMPTED"
     deepfake_analysis: Literal["NO_ANOMALY", "FLAGGED", "NOT_ATTEMPTED"] = "NOT_ATTEMPTED"
 
@@ -79,20 +80,30 @@ class VerificationSession(BaseModel):
     document_match: bool = False
     document_details: Optional[Dict[str, Any]] = None
     extracted_document_portrait_sha256: Optional[str] = None
+    extracted_document_portrait_embedding: Optional[List[float]] = None
     
     # Stage 3: Liveness & Face Match
-    face_match: Literal["MATCH", "NO_MATCH", "NOT_ATTEMPTED"] = "NOT_ATTEMPTED"
+    face_match: Literal["MATCH", "UNCERTAIN", "NO_MATCH", "NOT_ATTEMPTED"] = "NOT_ATTEMPTED"
     face_similarity_score: float = 0.0
     liveness_result: Literal["CONFIRMED", "UNCERTAIN", "FAILED", "NOT_ATTEMPTED"] = "NOT_ATTEMPTED"
     deepfake_result: Literal["NO_ANOMALY", "FLAGGED", "NOT_ATTEMPTED"] = "NOT_ATTEMPTED"
     deepfake_score: float = 0.0
+    detection_mode: Optional[str] = "heuristic_fallback"
     challenge_type: Optional[str] = None
+    challenge_sequence: Optional[List[str]] = None
     challenge_match: bool = False
     
     # Decision Matrix & Finalization
     decision_table: DecisionTable = Field(default_factory=DecisionTable)
     final_decision: Optional[str] = None
     final_reason: Optional[str] = None
+
+    # Agentic Reasoning & Escalation Layer
+    retry_count: int = 0
+    escalation_triggered: bool = False
+    retry_requested: bool = False
+    retry_note: Optional[str] = None
+    agent_reasoning_trace: Optional[Dict[str, Any]] = None
 
 
 # ─── API Request & Response Schemas ───────────────────────────────────────────
@@ -121,6 +132,7 @@ class StartVerificationResponse(BaseModel):
     message: Optional[str] = None
     maskedPhone: Optional[str] = None
     stages_completed: Optional[List[str]] = None
+    challengeSequence: Optional[List[str]] = None
 
 
 class VerificationStatusResponse(BaseModel):
@@ -139,6 +151,12 @@ class VerificationStatusResponse(BaseModel):
     finalReason: Optional[str] = None
     decisionTable: DecisionTable
     documentDetails: Optional[Dict[str, Any]] = None
+    detectionMode: Optional[str] = None
+    challengeSequence: Optional[List[str]] = None
+    retryCount: int = 0
+    retryRequested: bool = False
+    retryNote: Optional[str] = None
+    agentReasoningTrace: Optional[Dict[str, Any]] = None
 
 
 class SendOtpResponse(BaseModel):
@@ -169,12 +187,15 @@ class DocumentVerificationResponse(BaseModel):
 
 class LivenessVerificationResponse(BaseModel):
     referenceId: str
-    faceMatch: Literal["MATCH", "NO_MATCH"]
+    faceMatch: Literal["MATCH", "UNCERTAIN", "NO_MATCH"]
     faceSimilarityScore: float
     livenessResult: Literal["CONFIRMED", "UNCERTAIN", "FAILED"]
     deepfakeResult: Literal["NO_ANOMALY", "FLAGGED"]
     deepfakeScore: float
     challengeMatch: bool
+    detectionMode: Optional[str] = "heuristic_fallback"
+    detectedSequence: Optional[List[str]] = None
+    expectedSequence: Optional[List[str]] = None
     message: str
 
 
@@ -187,3 +208,8 @@ class FinalizeVerificationResponse(BaseModel):
     finalReason: str
     decisionTable: DecisionTable
     verifiedAt: Optional[str] = None
+    retryRequested: bool = False
+    retryCount: int = 0
+    retryNote: Optional[str] = None
+    challengeSequence: Optional[List[str]] = None
+    agentReasoningTrace: Optional[Dict[str, Any]] = None

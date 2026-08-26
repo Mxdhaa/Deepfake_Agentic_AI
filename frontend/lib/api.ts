@@ -322,7 +322,7 @@ export interface DecisionTable {
   phone_otp: "VERIFIED" | "FAILED" | "NOT_ATTEMPTED";
   document: "MATCH" | "NO_MATCH" | "NOT_ATTEMPTED";
   document_face: "MATCH" | "NO_MATCH" | "NOT_ATTEMPTED";
-  live_face: "MATCH" | "NO_MATCH" | "NOT_ATTEMPTED";
+  live_face: "MATCH" | "UNCERTAIN" | "NO_MATCH" | "NOT_ATTEMPTED";
   liveness: "CONFIRMED" | "UNCERTAIN" | "FAILED" | "NOT_ATTEMPTED";
   deepfake_analysis: "NO_ANOMALY" | "FLAGGED" | "NOT_ATTEMPTED";
 }
@@ -343,6 +343,12 @@ export interface VerificationSessionState {
   finalReason?: string | null;
   decisionTable: DecisionTable;
   documentDetails?: any;
+  detectionMode?: string;
+  challengeSequence?: string[];
+  retryCount?: number;
+  retryRequested?: boolean;
+  retryNote?: string | null;
+  agentReasoningTrace?: any;
 }
 
 /**
@@ -358,6 +364,7 @@ export async function startVerification(payload: {
   message?: string;
   maskedPhone?: string;
   stages_completed?: string[];
+  challengeSequence?: string[];
 }> {
   const res = await fetch(`${BASE_URL}/api/v1/verification/start`, {
     method: "POST",
@@ -453,7 +460,7 @@ export async function uploadVerificationDocument(
 export async function submitVerificationLiveness(
   referenceId: string,
   clip: File | Blob,
-  challengeType: string = "blink_twice",
+  challengeType?: string,
 ): Promise<{
   referenceId: string;
   faceMatch: "MATCH" | "NO_MATCH";
@@ -462,11 +469,15 @@ export async function submitVerificationLiveness(
   deepfakeResult: "NO_ANOMALY" | "FLAGGED";
   deepfakeScore: number;
   challengeMatch: boolean;
+  detectedSequence?: string[];
+  expectedSequence?: string[];
   message: string;
 }> {
   const form = new FormData();
   form.append("clip", clip, "liveness.mp4");
-  form.append("challenge_type", challengeType);
+  if (challengeType) {
+    form.append("challenge_type", challengeType);
+  }
   const res = await fetch(`${BASE_URL}/api/v1/verification/${referenceId}/liveness`, {
     method: "POST",
     body: form,
@@ -486,9 +497,39 @@ export async function finalizeVerification(referenceId: string): Promise<{
   finalReason: string;
   decisionTable: DecisionTable;
   verifiedAt?: string;
+  retryRequested?: boolean;
+  retryCount?: number;
+  retryNote?: string | null;
+  challengeSequence?: string[];
+  agentReasoningTrace?: any;
 }> {
   const res = await fetch(`${BASE_URL}/api/v1/verification/${referenceId}/finalize`, {
     method: "POST",
+  });
+  return handleResponse<any>(res);
+}
+
+/**
+ * 9. Submit direct reviewer decision on a session by referenceId
+ */
+export async function submitSessionReviewDecision(
+  referenceId: string,
+  action: "approve" | "reject",
+  reviewerId: string,
+  notes?: string,
+  token: string = "",
+): Promise<any> {
+  const res = await fetch(`${BASE_URL}/api/v1/review/${referenceId}/decision`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Reviewer-Token": token,
+    },
+    body: JSON.stringify({
+      action,
+      reviewer_id: reviewerId,
+      notes: notes || "",
+    }),
   });
   return handleResponse<any>(res);
 }

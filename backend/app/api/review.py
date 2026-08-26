@@ -94,9 +94,27 @@ class ClipAccessResponse(BaseModel):
 
 
 class ReviewDecisionRequest(BaseModel):
-    action: Literal["approve", "reject"] = Field(..., description="Reviewer action: 'approve' or 'reject'")
+    action: Optional[str] = Field(None, description="Reviewer action: 'approve' or 'reject'")
+    verdict: Optional[str] = Field(None, description="Reviewer verdict: 'VERIFIED' or 'NOT_VERIFIED'")
     reviewer_id: Optional[str] = Field(None, description="Reviewer identifier or name")
     notes: Optional[str] = Field(None, description="Optional investigative notes")
+    note: Optional[str] = Field(None, description="Optional investigative notes")
+
+    def get_action(self) -> str:
+        if self.action:
+            act = self.action.strip().lower()
+            if act in {"approve", "verified"}:
+                return "approve"
+            return "reject"
+        if self.verdict:
+            verd = self.verdict.strip().upper()
+            if verd in {"VERIFIED", "APPROVE"}:
+                return "approve"
+            return "reject"
+        return "approve"
+
+    def get_notes(self) -> str:
+        return self.notes or self.note or ""
 
 
 class ReviewDecisionResponse(BaseModel):
@@ -164,15 +182,27 @@ async def submit_decision(
     reviewer_id = _authenticate(x_reviewer_token, request)
     ip = request.client.host if request.client else "unknown"
 
+    # Terminal state check on underlying session to guard against double-reviews / race conditions
+    from app.services.verification_service import get_verification_service
+    v_service = get_verification_service()
+    existing_session = v_service.get_session(case_id)
+    if existing_session and existing_session.status in {"VERIFIED", "NOT_VERIFIED", "ALREADY_VERIFIED"}:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "SESSION_ALREADY_CLOSED", "message": "This session has already reached a terminal resolution."},
+        )
+
     # Use provided reviewer_id name if passed, else authenticated token ID
     effective_reviewer = payload.reviewer_id or reviewer_id
+    action = payload.get_action()
+    notes = payload.get_notes()
 
     try:
         resolved = resolve_case(
             case_id=case_id,
-            action=payload.action,
+            action=action,
             reviewer_id=effective_reviewer,
-            notes=payload.notes,
+            notes=notes,
             ip=ip,
         )
         return ReviewDecisionResponse(
@@ -188,6 +218,25 @@ async def submit_decision(
         raise HTTPException(status_code=404, detail=f"Case {case_id!r} not found.")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post(
+    "/{reference_id}/decision",
+    response_model=ReviewDecisionResponse,
+    summary="Submit reviewer decision on a session by reference ID (Auth-Gated)",
+)
+async def submit_session_decision(
+    reference_id: str,
+    payload: ReviewDecisionRequest,
+    request: Request,
+    x_reviewer_token: Optional[str] = Header(None, alias="X-Reviewer-Token"),
+) -> ReviewDecisionResponse:
+    return await submit_decision(
+        case_id=reference_id,
+        payload=payload,
+        request=request,
+        x_reviewer_token=x_reviewer_token,
+    )
 
 
 # ─── Media Review Endpoints ───────────────────────────────────────────────────

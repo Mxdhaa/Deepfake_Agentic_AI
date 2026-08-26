@@ -838,17 +838,38 @@ export default function ReviewPage() {
                 </div>
               </div>
 
-              {/* Stage 3 Autonomous Agent Tool Execution Trace */}
-              <div className="glass" style={{ padding: "1.25rem" }}>
-                <h3 style={{ fontSize: "0.95rem", fontWeight: 600, marginBottom: "8px" }}>
-                  Stage 3 Agent Investigation Trace (Cryptographically Sealed)
-                </h3>
+              {/* LangGraph Autonomous Agent Reasoning & Escalation Trace */}
+              <div className="glass" style={{ padding: "1.25rem", display: "flex", flexDirection: "column", gap: "10px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <h3 style={{ fontSize: "0.95rem", fontWeight: 600 }}>
+                    LangGraph Agent Reasoning &amp; Escalation Trace (Sealed)
+                  </h3>
+                  <span style={{ fontSize: "0.75rem", color: "#a855f7", fontFamily: "var(--font-mono)" }}>
+                    FAIL-CLOSED VERDICT ENGINE
+                  </span>
+                </div>
+
+                {/* Plain-language explanation banner */}
+                <div
+                  style={{
+                    background: "rgba(168, 85, 247, 0.08)",
+                    border: "1px solid rgba(168, 85, 247, 0.25)",
+                    borderRadius: "6px",
+                    padding: "10px 12px",
+                    fontSize: "0.85rem",
+                    color: "#e9d5ff",
+                    lineHeight: 1.45,
+                  }}
+                >
+                  💡 <strong>Agent Rationale:</strong> {selectedCase.dossier_summary || selectedCase.notes || "Evaluation completed."}
+                </div>
+
                 <pre
                   style={{
                     background: "rgba(0,0,0,0.4)",
                     padding: "12px",
                     borderRadius: "8px",
-                    fontSize: "0.8rem",
+                    fontSize: "0.78rem",
                     color: "#a5f3fc",
                     whiteSpace: "pre-wrap",
                     fontFamily: "monospace",
@@ -857,7 +878,18 @@ export default function ReviewPage() {
                     border: "1px solid var(--border)",
                   }}
                 >
-                  {selectedCase.dossier_summary || JSON.stringify(selectedCase.tool_calls_trace, null, 2)}
+                  {JSON.stringify(
+                    selectedCase.tool_calls_trace && selectedCase.tool_calls_trace.length > 0
+                      ? selectedCase.tool_calls_trace
+                      : {
+                          dossier_summary: selectedCase.dossier_summary,
+                          signals: selectedCase.signals,
+                          decision: selectedCase.decision,
+                          recommendation: selectedCase.agent_recommendation,
+                        },
+                    null,
+                    2
+                  )}
                 </pre>
               </div>
 

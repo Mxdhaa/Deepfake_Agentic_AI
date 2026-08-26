@@ -125,12 +125,12 @@ def test_decision_boundary_pass():
 
 
 def test_decision_boundary_borderline_by_similarity():
-    """0.35 <= similarity < 0.60 with velocity < 3 -> BORDERLINE."""
+    """0.35 <= similarity < 0.50 with velocity < 3 -> BORDERLINE."""
     v1 = np.zeros(512, dtype=np.float32)
     v2 = np.zeros(512, dtype=np.float32)
     v1[0] = 1.0
-    v2[0] = 0.50
-    v2[1] = np.sqrt(1.0 - 0.50**2)
+    v2[0] = 0.42
+    v2[1] = np.sqrt(1.0 - 0.42**2)
 
     with patch("app.services.identity.lookup_registry_velocity", return_value=1):
         res = evaluate_identity_embeddings(v1, v2)
@@ -376,7 +376,7 @@ def test_api_config_endpoint():
     assert resp.status_code == 200
     body = resp.json()
     assert "thresholds" in body
-    assert body["thresholds"]["similarity_pass"] == 0.60
+    assert body["thresholds"]["similarity_pass"] == 0.50
     assert body["thresholds"]["similarity_fail"] == 0.35
     assert body["thresholds"]["velocity_borderline"] == 3
     assert body["thresholds"]["velocity_fail"] == 6
