@@ -95,7 +95,24 @@ export class ApiError extends Error {
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const body = await res.text();
-    throw new ApiError(res.status, body || res.statusText);
+    let parsedMessage = body || res.statusText;
+    try {
+      const parsed = JSON.parse(body);
+      if (parsed && typeof parsed === "object") {
+        if (parsed.message) {
+          parsedMessage = parsed.message;
+        } else if (parsed.detail) {
+          if (typeof parsed.detail === "object") {
+            parsedMessage = parsed.detail.message || parsed.detail.error || JSON.stringify(parsed.detail);
+          } else {
+            parsedMessage = parsed.detail;
+          }
+        } else if (parsed.error) {
+          parsedMessage = parsed.error;
+        }
+      }
+    } catch {}
+    throw new ApiError(res.status, parsedMessage);
   }
   return res.json() as Promise<T>;
 }
@@ -446,12 +463,23 @@ export async function uploadVerificationDocument(
   message: string;
 }> {
   const form = new FormData();
-  form.append("document", documentFile, "id_document.jpg");
-  const res = await fetch(`${BASE_URL}/api/v1/verification/${referenceId}/document`, {
-    method: "POST",
-    body: form,
-  });
-  return handleResponse<any>(res);
+  const filename = (documentFile instanceof File && documentFile.name) ? documentFile.name : "id_document.jpg";
+  form.append("document", documentFile, filename);
+  try {
+    const res = await fetch(`${BASE_URL}/api/v1/verification/${referenceId}/document`, {
+      method: "POST",
+      body: form,
+    });
+    return handleResponse<any>(res);
+  } catch (err: any) {
+    if (err instanceof ApiError) throw err;
+    throw new ApiError(
+      500,
+      err?.message === "Failed to fetch"
+        ? "Unable to reach verification backend. Please ensure the backend server is active on http://localhost:8000."
+        : (err?.message || "Document verification failed. Please try again.")
+    );
+  }
 }
 
 /**

@@ -237,7 +237,14 @@ export default function OnboardingPage() {
       setDocumentResult(res);
       setStep("liveness");
     } catch (err: any) {
-      setErrorMsg(err.message || "Document verification failed. Please ensure you upload a valid ID card containing a clear face portrait.");
+      let msg = err?.message || "Document verification failed. Please ensure you upload a valid ID card containing a clear face portrait.";
+      if (typeof msg === "string" && msg.trim().startsWith("{") && msg.trim().endsWith("}")) {
+        try {
+          const parsed = JSON.parse(msg);
+          msg = parsed.message || (parsed.detail ? (typeof parsed.detail === "object" ? parsed.detail.message || parsed.detail.error : parsed.detail) : msg);
+        } catch {}
+      }
+      setErrorMsg(msg);
     } finally {
       setIsSubmitting(false);
     }

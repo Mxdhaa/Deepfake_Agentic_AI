@@ -25,32 +25,48 @@ class Settings(BaseSettings):
     ALLOWED_ORIGINS: Union[List[str], str] = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
+        "http://localhost:3002",
+        "http://127.0.0.1:3002",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
     ]
-    VERCEL_PREVIEW_REGEX: str = r"^https:\/\/.*\.vercel\.app$"
+    VERCEL_PREVIEW_REGEX: str = r"^(https:\/\/.*\.vercel\.app|http:\/\/localhost:\d+|http:\/\/127\.0\.0\.1:\d+)$"
 
     @field_validator("ALLOWED_ORIGINS", mode="before")
     @classmethod
     def parse_allowed_origins(cls, v: Union[str, List[str], None]) -> List[str]:
+        default_origins = [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:3001",
+            "http://127.0.0.1:3001",
+            "http://localhost:3002",
+            "http://127.0.0.1:3002",
+            "http://localhost:8000",
+            "http://127.0.0.1:8000",
+        ]
         if v is None:
-            return ["http://localhost:3000", "http://127.0.0.1:3000"]
+            return default_origins
         if isinstance(v, str):
             v = v.strip()
             if not v:
-                return ["http://localhost:3000", "http://127.0.0.1:3000"]
+                return default_origins
             if v.startswith("[") and v.endswith("]"):
                 try:
                     parsed = json.loads(v)
                     if isinstance(parsed, list):
                         filtered = [str(item).strip() for item in parsed if str(item).strip() and str(item).strip() != "*"]
-                        return filtered if filtered else ["http://localhost:3000", "http://127.0.0.1:3000"]
+                        return list(set(default_origins + filtered))
                 except Exception:
                     pass
             filtered = [orig.strip() for orig in v.split(",") if orig.strip() and orig.strip() != "*"]
-            return filtered if filtered else ["http://localhost:3000", "http://127.0.0.1:3000"]
+            return list(set(default_origins + filtered))
         elif isinstance(v, list):
             filtered = [str(orig).strip() for orig in v if str(orig).strip() and str(orig).strip() != "*"]
-            return filtered if filtered else ["http://localhost:3000", "http://127.0.0.1:3000"]
-        return ["http://localhost:3000", "http://127.0.0.1:3000"]
+            return list(set(default_origins + filtered))
+        return default_origins
 
     def get_effective_origins(self) -> List[str]:
         """Returns ALLOWED_ORIGINS plus FRONTEND_URL if specified."""

@@ -466,10 +466,29 @@ def detect_sequential_motion(
     if canonical_expected:
         m = len(canonical_expected)
         n = len(compact_peaks)
-        exact_match = (compact_peaks == canonical_expected)
+
+        # Mirror mapping (left <-> right) to handle browser webcam preview mirroring differences
+        mirrored_expected = [{"left": "right", "right": "left"}.get(g, g) for g in canonical_expected]
+
+        exact_match = (compact_peaks == canonical_expected) or (compact_peaks == mirrored_expected)
         # Contiguous correctly-ordered subsequence matching:
-        contiguous_subsequence = any(compact_peaks[i : i + m] == canonical_expected for i in range(n - m + 1)) if n >= m else False
-        challenge_passed = bool(has_general_motion and (exact_match or contiguous_subsequence))
+        contiguous_sub = (
+            any(
+                compact_peaks[i : i + m] == canonical_expected or compact_peaks[i : i + m] == mirrored_expected
+                for i in range(n - m + 1)
+            )
+            if n >= m
+            else False
+        )
+
+        # Ordered subsequence alignment (permits natural settling motions between gestures)
+        def _is_ordered_subsequence(sub, full):
+            it = iter(full)
+            return all(item in it for item in sub)
+
+        ordered_sub = _is_ordered_subsequence(canonical_expected, compact_peaks) or _is_ordered_subsequence(mirrored_expected, compact_peaks)
+
+        challenge_passed = bool(has_general_motion and (exact_match or contiguous_sub or ordered_sub))
     else:
         challenge_passed = bool(has_general_motion and len(compact_peaks) > 0)
 

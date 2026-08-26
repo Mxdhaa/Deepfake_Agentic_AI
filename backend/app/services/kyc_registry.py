@@ -21,20 +21,17 @@ log = get_logger(__name__)
 
 
 def _resolve_storage_file(filename: str) -> Path:
-    env_root = os.getenv("STORAGE_LOCAL_ROOT")
-    if env_root:
-        p = Path(env_root) / filename
-        p.parent.mkdir(parents=True, exist_ok=True)
-        return p
-
     backend_dir = Path(__file__).resolve().parent.parent.parent
-    root_file = backend_dir.parent / "data" / "storage" / filename
-    if root_file.parent.exists():
-        return root_file
+    root_storage = backend_dir.parent / "data" / "storage"
+    if root_storage.exists():
+        return root_storage / filename
 
-    local_file = backend_dir / "data" / "storage" / filename
-    local_file.parent.mkdir(parents=True, exist_ok=True)
-    return local_file
+    local_storage = backend_dir / "data" / "storage"
+    if local_storage.exists():
+        return local_storage / filename
+
+    root_storage.mkdir(parents=True, exist_ok=True)
+    return root_storage / filename
 
 
 _REGISTRY_FILE = _resolve_storage_file("ckyc_registry.json")

@@ -24,6 +24,15 @@ async def lifespan(app: FastAPI):
     """Application lifespan: startup → yield → shutdown."""
     setup_logging()
     log.info("deepfake_agent.startup", version="0.1.0", env=settings.ENVIRONMENT)
+    
+    # Pre-warm OCR reader in background so user requests don't hit cold-start timeouts
+    try:
+        import threading
+        from app.services.ocr_service import _get_ocr_reader
+        threading.Thread(target=_get_ocr_reader, daemon=True).start()
+    except Exception as exc:
+        log.warning("ocr.prewarm_failed", error=str(exc))
+
     yield
     log.info("deepfake_agent.shutdown")
 

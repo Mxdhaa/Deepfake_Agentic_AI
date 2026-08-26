@@ -280,6 +280,19 @@ async def upload_document(
         }
     except ValueError as exc:
         raise HTTPException(status_code=404, detail={"error": "SESSION_NOT_FOUND", "message": str(exc)})
+    except Exception as exc:
+        log.error("verification.upload_document_error", reference_id=reference_id, error=str(exc))
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "OCR_PROCESSING_ERROR",
+                "message": f"Unable to process ID document: {str(exc)}",
+                "referenceId": reference_id,
+                "documentMatch": False,
+                "extractedFields": {},
+                "fields": {"portrait_photo": "mismatch", "document_structure": "mismatch"},
+            },
+        )
 
 
 # ── 6. Liveness & Face Match ──────────────────────────────────────────────────

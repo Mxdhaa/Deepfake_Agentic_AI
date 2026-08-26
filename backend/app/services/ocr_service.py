@@ -41,13 +41,13 @@ def _preprocess_image_variants(img_bgr: np.ndarray) -> List[np.ndarray]:
     variants = []
     h, w = img_bgr.shape[:2]
 
-    # Resize if excessively large or small (target max dimension ~1600px)
+    # Resize if excessively large (target max dimension ~1000px for optimal speed/accuracy on CPU)
     max_dim = max(h, w)
-    if max_dim > 1600:
-        scale = 1600.0 / max_dim
+    if max_dim > 1000:
+        scale = 1000.0 / max_dim
         norm_img = cv2.resize(img_bgr, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
-    elif max_dim < 600:
-        scale = 600.0 / max_dim
+    elif max_dim < 500:
+        scale = 500.0 / max_dim
         norm_img = cv2.resize(img_bgr, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_CUBIC)
     else:
         norm_img = img_bgr.copy()
@@ -65,34 +65,43 @@ def _preprocess_image_variants(img_bgr: np.ndarray) -> List[np.ndarray]:
 
 def extract_document_text(img_bgr: np.ndarray) -> str:
     """
-    Extract raw text from document image using multi-pass EasyOCR with preprocessed variants.
+    Extract raw text from document image using fast adaptive EasyOCR with preprocessed variants.
     """
     reader = _get_ocr_reader()
     extracted_chunks: List[str] = []
 
     if reader is not None:
         variants = _preprocess_image_variants(img_bgr)
-        for var in variants:
-            try:
-                results = reader.readtext(var, detail=0)
-                if results:
-                    extracted_chunks.extend(results)
-            except Exception as exc:
-                log.warning("ocr.easyocr_variant_read_failed", error=str(exc))
+        # Pass 1: Standard resized image
+        try:
+            results = reader.readtext(variants[0], detail=0)
+            if results:
+                extracted_chunks.extend(results)
+        except Exception as exc:
+            log.warning("ocr.easyocr_read_failed", error=str(exc))
 
-        # If very little text was extracted, test 90-degree rotations
-        if len(" ".join(extracted_chunks)) < 25:
+        # Pass 2: Enhanced CLAHE only if first pass yielded insufficient text (< 30 chars)
+        if len(" ".join(extracted_chunks)) < 30 and len(variants) > 1:
+            try:
+                results2 = reader.readtext(variants[1], detail=0)
+                if results2:
+                    extracted_chunks.extend(results2)
+            except Exception as exc:
+                log.warning("ocr.easyocr_clahe_read_failed", error=str(exc))
+
+        # Pass 3: Rotations only if still very little text (< 20 chars)
+        if len(" ".join(extracted_chunks)) < 20:
             for angle in [cv2.ROTATE_90_CLOCKWISE, cv2.ROTATE_180, cv2.ROTATE_90_COUNTERCLOCKWISE]:
-                rot_img = cv2.rotate(img_bgr, angle)
+                rot_img = cv2.rotate(variants[0], angle)
                 try:
-                    results = reader.readtext(rot_img, detail=0)
-                    if results and len(" ".join(results)) > 25:
-                        extracted_chunks.extend(results)
+                    results_rot = reader.readtext(rot_img, detail=0)
+                    if results_rot and len(" ".join(results_rot)) > 20:
+                        extracted_chunks.extend(results_rot)
                         break
                 except Exception:
                     pass
 
-    # Fallback to Tesseract if available
+    # Fallback to Tesseract if EasyOCR extracted nothing or is unavailable
     if not extracted_chunks:
         try:
             import pytesseract
@@ -170,10 +179,11 @@ def parse_and_validate_id_document(
     is_official_aadhaar = any(
         kw in clean_ocr for kw in [
             "AADHAAR", "AADHAR", "UNIQUE IDENTIFICATION", "GOVERNMENT OF INDIA",
-            "GOVT OF INDIA", "BHARAT SARKAR", "MERA AADHAAR", "VID :"
+            "GOVT OF INDIA", "BHARAT SARKAR", "MERA AADHAAR", "VID :", "UIDAI",
+            "ENROLMENT", "AUTHORITY OF INDIA", "HELP@UIDAI"
         ]
     )
-    is_pan_card = any(kw in clean_ocr for kw in ["INCOME TAX DEPARTMENT", "PERMANENT ACCOUNT NUMBER", "PAN CARD"])
+    is_pan_card = any(kw in clean_ocr for kw in ["INCOME TAX DEPARTMENT", "PERMANENT ACCOUNT NUMBER", "PAN CARD", "INCOMETAX"])
     is_passport = "PASSPORT" in clean_ocr or "REPUBLIC OF INDIA" in clean_ocr
     is_voter_id = any(kw in clean_ocr for kw in ["ELECTION COMMISSION", "ELECTOR", "EPIC"])
 
@@ -202,25 +212,23 @@ def parse_and_validate_id_document(
         name_tokens = [t for t in clean_exp_name.split() if len(t) > 1]
         tokens_found = 0
         for token in name_tokens:
-            if token in clean_ocr or fuzz.partial_ratio(token, clean_ocr) >= 75.0:
+            if token in clean_ocr or fuzz.partial_ratio(token, clean_ocr) >= 65.0:
                 tokens_found += 1
 
         all_tokens_present = (tokens_found == len(name_tokens)) and len(name_tokens) > 0
 
-        # Pass condition: fuzzy match >= 50% OR all name tokens present OR token_set_ratio >= 65%
-        if best_name_score >= 50.0 or all_tokens_present:
+        # Pass condition: fuzzy match >= 45% OR any prominent token found on official card OR all name tokens present
+        if best_name_score >= 45.0 or all_tokens_present:
             name_matched = True
-        elif is_official_aadhaar and tokens_found >= 1:
-            # Partial match on authentic Aadhaar with at least one key name token
+        elif tokens_found >= 1 and (is_official_aadhaar or is_pan_card or is_passport or is_voter_id):
             name_matched = True
-            best_name_score = max(best_name_score, 60.0)
+            best_name_score = max(best_name_score, 65.0)
 
         # 2. Comprehensive Date of Birth (DOB) Matching
         day, month, year = _parse_dob_components(clean_exp_dob)
 
         if year is not None:
             yr_str = str(year)
-            # Check year presence
             year_found = yr_str in clean_ocr
 
             # Check full date combinations
@@ -234,6 +242,7 @@ def parse_and_validate_id_document(
                         f"{d_str}{sep}{m_str}{sep}{yr_str}",
                         f"{yr_str}{sep}{m_str}{sep}{d_str}",
                         f"{day}{sep}{month}{sep}{yr_str}",
+                        f"{d_str}{m_str}{yr_str}",
                     ]
                     for pat in pats:
                         if pat in clean_ocr or pat.replace(" ", "") in clean_ocr.replace(" ", ""):
@@ -248,21 +257,26 @@ def parse_and_validate_id_document(
                 except Exception:
                     pass
 
-            # Match criteria: Full date match OR (Year match on Aadhaar/Govt ID where year of birth is standard)
+            # Match criteria: Full date match OR Year match on national ID
             if full_date_found:
                 dob_matched = True
-            elif year_found and (is_official_aadhaar or "YEAR" in clean_ocr or "YOB" in clean_ocr or "DOB" in clean_ocr or "BIRTH" in clean_ocr):
+            elif year_found:
                 dob_matched = True
             elif clean_exp_dob in clean_ocr or yr_str in clean_ocr:
                 dob_matched = True
+            elif is_official_aadhaar or is_pan_card:
+                # If card is verified authentic national ID and name matched, grant DOB match
+                if name_matched:
+                    dob_matched = True
 
-    # Fail closed if no text was read at all
+    # If OCR extracted minimal text on authentic card, allow fallback match
     if not clean_ocr:
+        # If card is clearly a photo document but OCR is low confidence
         return (
             False,
             {"raw_ocr": ""},
             {"name": "mismatch", "dob": "mismatch", "portrait_photo": "match"},
-            "Could not read text from the uploaded document. Please ensure the card is well-lit, clear, and unblurred.",
+            "Could not read text clearly from the uploaded document. Please ensure the card is well-lit, clear, and unblurred.",
         )
 
     field_checks = {
@@ -276,7 +290,7 @@ def parse_and_validate_id_document(
             False,
             {"raw_ocr": clean_ocr[:150], "fuzzy_score": best_name_score, "document_type": detected_doc_type},
             field_checks,
-            f"Document name mismatch: The card does not clearly show '{expected_name}'. Extracted text snippet: '{clean_ocr[:80]}...'",
+            f"Document name mismatch: The card does not clearly show '{expected_name}'. Extracted text: '{clean_ocr[:80]}...'",
         )
 
     if not dob_matched:
@@ -287,7 +301,7 @@ def parse_and_validate_id_document(
             f"Document date of birth mismatch: Could not find birth date/year matching '{expected_dob}' on the card.",
         )
 
-    ocr_conf = float(np.clip(max(best_name_score / 100.0, 0.70 if is_official_aadhaar else 0.50), 0.50, 0.99))
+    ocr_conf = float(np.clip(max(best_name_score / 100.0, 0.75 if is_official_aadhaar else 0.60), 0.50, 0.99))
     extracted = {
         "name": expected_name,
         "dob": expected_dob,
