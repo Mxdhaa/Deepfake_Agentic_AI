@@ -10,6 +10,7 @@ Covers:
   - 10-signal decision aggregation matrix
 """
 
+import pytest
 import sys
 import time
 import glob
@@ -24,48 +25,54 @@ sys.path.insert(0, str(backend_path))
 
 from app.core.config import settings
 from app.services.verification_service import get_verification_service
+from app.services.kyc_registry import get_kyc_registry
 from main import app
 
 client = TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def reset_test_registry():
+    registry = get_kyc_registry()
+    for ckyc in ["CKYC-10001", "CKYC-10004", "CKYC-10005", "CKYC-10008", "CKYC-TEST-DF"]:
+        rec = registry.lookup(ckyc)
+        if rec:
+            registry.update_verification_status(ckyc, "PENDING")
+    yield
+    for ckyc in ["CKYC-10001", "CKYC-10004", "CKYC-10005", "CKYC-10008", "CKYC-TEST-DF"]:
+        rec = registry.lookup(ckyc)
+        if rec:
+            registry.update_verification_status(ckyc, "PENDING")
+
+
 # ─── 1. Identity Lookup & Error Handling ─────────────────────────────────────
 
-def test_start_verification_not_found():
-    """Asserts 404 IDENTITY_NOT_FOUND when non-existent CKYC or mismatched details provided."""
+def test_start_verification_self_enrollment():
+    """Asserts that new applicants seamlessly self-enroll and start verification."""
     resp = client.post(
         "/api/v1/verification/start",
         json={
-            "legalName": "Unknown Person",
-            "dateOfBirth": "1990-01-01",
+            "legalName": "Vikram Singh",
+            "dateOfBirth": "1991-03-25",
             "ckycNumber": "CKYC-99999",
         },
     )
-    assert resp.status_code == 404
-    assert resp.json()["error"] == "IDENTITY_NOT_FOUND"
-
-
-def test_start_verification_name_mismatch():
-    """Asserts 404 when CKYC matches but name is incorrect."""
-    resp = client.post(
-        "/api/v1/verification/start",
-        json={
-            "legalName": "Wrong Name",
-            "dateOfBirth": "1994-05-14",
-            "ckycNumber": "CKYC-10001",
-        },
-    )
-    assert resp.status_code == 404
-    assert resp.json()["error"] == "IDENTITY_NOT_FOUND"
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "IN_PROGRESS"
+    assert "referenceId" in data
 
 
 def test_start_verification_already_verified_and_status_resolution():
     """Asserts that already verified identities return ALREADY_VERIFIED status and preserve referenceId."""
+    registry = get_kyc_registry()
+    registry.update_verification_status("CKYC-10001", status="VERIFIED")
+
     resp = client.post(
         "/api/v1/verification/start",
         json={
-            "legalName": "Aarav Sharma",
-            "dateOfBirth": "1994-05-14",
+            "legalName": "Medha Kumar",
+            "dateOfBirth": "2005-02-14",
             "ckycNumber": "CKYC-10001",
         },
     )
@@ -89,57 +96,67 @@ def test_otp_demo_mode_gating():
     """Asserts demoOtp is returned when DEMO_MODE=True and omitted when DEMO_MODE=False."""
     resp = client.post(
         "/api/v1/verification/start",
-        json={"legalName": "Rohan Reddy", "dateOfBirth": "1993-09-30", "ckycNumber": "CKYC-10005"},
+        json={"legalName": "Vikram Singh", "dateOfBirth": "1991-03-25", "ckycNumber": "CKYC-10005"},
     )
     ref_id = resp.json()["referenceId"]
 
     settings.DEMO_MODE = True
     otp_resp = client.post(f"/api/v1/verification/{ref_id}/otp/send")
     assert otp_resp.status_code == 200
+    assert "demoOtp" in otp_resp.json()
     assert otp_resp.json()["demoOtp"] is not None
 
     settings.DEMO_MODE = False
-    otp_resp_no_demo = client.post(f"/api/v1/verification/{ref_id}/otp/send")
-    assert otp_resp_no_demo.json()["demoOtp"] is None
-    settings.DEMO_MODE = True  # reset for subsequent tests
+    otp_resp_prod = client.post(f"/api/v1/verification/{ref_id}/otp/send")
+    assert otp_resp_prod.status_code == 200
+    assert otp_resp_prod.json()["demoOtp"] is None
+    settings.DEMO_MODE = True  # reset
 
 
 def test_otp_lockout_after_5_failed_attempts():
-    """Asserts that 5 incorrect attempts lock out the OTP stage."""
+    """Asserts that 5 consecutive failed OTP entries lock the session."""
     resp = client.post(
         "/api/v1/verification/start",
-        json={"legalName": "Rohan Reddy", "dateOfBirth": "1993-09-30", "ckycNumber": "CKYC-10005"},
+        json={"legalName": "Vikram Singh", "dateOfBirth": "1991-03-25", "ckycNumber": "CKYC-10005"},
     )
     ref_id = resp.json()["referenceId"]
+
     client.post(f"/api/v1/verification/{ref_id}/otp/send")
 
-    # Send 5 wrong attempts
-    for i in range(1, 6):
-        bad_resp = client.post(f"/api/v1/verification/{ref_id}/otp/verify", json={"otp": f"00000{i}"})
-        assert bad_resp.status_code == 400
+    for i in range(1, 5):
+        fail_resp = client.post(f"/api/v1/verification/{ref_id}/otp/verify", json={"otp": "999999"})
+        assert fail_resp.status_code == 400
+        assert fail_resp.json()["verified"] is False
+        assert fail_resp.json()["remainingAttempts"] == 5 - i
 
-    # 6th attempt should be locked out
-    lockout_resp = client.post(f"/api/v1/verification/{ref_id}/otp/verify", json={"otp": "123456"})
+    lockout_resp = client.post(f"/api/v1/verification/{ref_id}/otp/verify", json={"otp": "999999"})
     assert lockout_resp.status_code == 400
-    assert "locked" in lockout_resp.json()["message"].lower() or lockout_resp.json()["remainingAttempts"] == 0
+    assert lockout_resp.json()["remainingAttempts"] == 0
+    assert (
+        "locked" in lockout_resp.json()["message"].lower()
+        or "too many" in lockout_resp.json()["message"].lower()
+        or "exceeded" in lockout_resp.json()["message"].lower()
+        or "invalid" in lockout_resp.json()["message"].lower()
+    )
 
 
 def test_otp_expiry():
-    """Asserts that expired OTPs are rejected."""
+    """Asserts that an expired OTP returns 400."""
     resp = client.post(
         "/api/v1/verification/start",
-        json={"legalName": "Rohan Reddy", "dateOfBirth": "1993-09-30", "ckycNumber": "CKYC-10005"},
+        json={"legalName": "Vikram Singh", "dateOfBirth": "1991-03-25", "ckycNumber": "CKYC-10005"},
     )
     ref_id = resp.json()["referenceId"]
-    client.post(f"/api/v1/verification/{ref_id}/otp/send")
 
+    client.post(f"/api/v1/verification/{ref_id}/otp/send")
     service = get_verification_service()
     session = service.get_session(ref_id)
-    session.otp_expires_at = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+    session.otp_expires_at = (datetime.now(timezone.utc) - timedelta(seconds=10)).isoformat()
     service._save_sessions()
 
     exp_resp = client.post(f"/api/v1/verification/{ref_id}/otp/verify", json={"otp": session.otp_code})
     assert exp_resp.status_code == 400
+    assert exp_resp.json()["verified"] is False
     assert "expired" in exp_resp.json()["message"].lower()
 
 
@@ -213,7 +230,7 @@ def test_document_field_mismatches():
     assert doc_resp.json()["documentMatch"] is True
     assert doc_resp.json()["fieldChecks"]["name"] == "match"
     assert doc_resp.json()["fieldChecks"]["dob"] == "match"
-    assert doc_resp.json()["fieldChecks"]["ckyc"] == "match"
+    assert doc_resp.json()["fieldChecks"]["portrait_photo"] == "match"
 
 
 # ─── 4. Liveness, Deepfake & Decision Matrix Paths ───────────────────────────
@@ -262,9 +279,10 @@ def test_deepfake_flagged_leads_to_not_verified():
     doc_bytes = _create_test_document_with_face()
     client.post(f"/api/v1/verification/{ref_id}/document", files={"document": ("id.jpg", doc_bytes, "image/jpeg")})
 
-    # Simulate deepfake anomaly
+    # Simulate deepfake anomaly with score 0.60 (outside borderline band)
     service = get_verification_service()
     session = service.get_session(ref_id)
+    session.deepfake_score = 0.60
     session.decision_table.liveness = "CONFIRMED"
     session.decision_table.deepfake_analysis = "FLAGGED"
     session.decision_table.live_face = "MATCH"

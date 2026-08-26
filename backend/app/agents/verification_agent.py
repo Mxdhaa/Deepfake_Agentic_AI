@@ -139,7 +139,7 @@ def node_collect_signals(state: VerificationAgentState) -> Dict[str, Any]:
             f"Face biometric similarity ({face_sim:.4f}) is below the minimum fail cutoff ({sim_fail:.2f})."
         )
     df_delta = round(deepfake_score - df_borderline, 4)
-    if deepfake_score >= df_fail or (dt.get("deepfake_analysis") == "FLAGGED" and df_delta > 0.05):
+    if deepfake_score >= df_fail or (dt.get("deepfake_analysis") == "FLAGGED" and abs(df_delta) > 0.05):
         hard_fail_reasons.append(
             f"Deepfake anomaly score ({deepfake_score:.4f}) exceeded allowable threshold ({df_borderline:.2f} + 0.05)."
         )

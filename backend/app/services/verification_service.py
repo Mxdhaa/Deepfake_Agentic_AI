@@ -311,15 +311,21 @@ class VerificationService:
 
         # 2. Real Face Detection & Feature Extraction from Document
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        clahe_gray = clahe.apply(gray)
+
         face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.08, minNeighbors=2, minSize=(30, 30))
+        faces = face_cascade.detectMultiScale(clahe_gray, scaleFactor=1.06, minNeighbors=2, minSize=(25, 25))
+        if len(faces) == 0:
+            faces = face_cascade.detectMultiScale(gray, scaleFactor=1.08, minNeighbors=2, minSize=(30, 30))
+
         if len(faces) == 0:
             prof_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_profileface.xml")
-            faces = prof_cascade.detectMultiScale(gray, scaleFactor=1.08, minNeighbors=2, minSize=(30, 30))
+            faces = prof_cascade.detectMultiScale(clahe_gray, scaleFactor=1.06, minNeighbors=2, minSize=(25, 25))
 
         if len(faces) == 0:
             eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_eye.xml")
-            eyes = eye_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=2, minSize=(10, 10))
+            eyes = eye_cascade.detectMultiScale(clahe_gray, scaleFactor=1.1, minNeighbors=2, minSize=(10, 10))
             if len(eyes) >= 1:
                 ex, ey, ew, eh = eyes[0]
                 faces = np.array([[max(0, ex - ew), max(0, ey - eh), ew * 3, eh * 3]])
@@ -329,21 +335,23 @@ class VerificationService:
             edges = cv2.Canny(gray, 50, 150)
             edge_density = float(np.mean(edges > 0))
             h_img, w_img = img.shape[:2]
-            left_quad = gray[:, :int(w_img * 0.4)]
-            if edge_density > 0.02 and float(np.std(left_quad)) > 20.0:
+            left_quad = gray[:, :int(w_img * 0.45)]
+            if edge_density > 0.02 and float(np.std(left_quad)) > 18.0:
                 faces = np.array([[int(w_img * 0.05), int(h_img * 0.2), int(w_img * 0.35), int(h_img * 0.6)]])
 
         has_document_face = len(faces) > 0
         doc_embedding: Optional[List[float]] = None
 
         if has_document_face:
-            fx, fy, fw, fh = faces[0]
-            # Crop face with 10% padding
+            # Pick largest detected face
+            faces_sorted = sorted(faces, key=lambda b: b[2] * b[3], reverse=True)
+            fx, fy, fw, fh = faces_sorted[0]
+            # Crop face with 15% padding
             h_img, w_img = img.shape[:2]
-            y1 = max(0, fy - int(fh * 0.1))
-            y2 = min(h_img, fy + int(fh * 1.1))
-            x1 = max(0, fx - int(fw * 0.1))
-            x2 = min(w_img, fx + int(fw * 1.1))
+            y1 = max(0, fy - int(fh * 0.15))
+            y2 = min(h_img, fy + int(fh * 1.15))
+            x1 = max(0, fx - int(fw * 0.15))
+            x2 = min(w_img, fx + int(fw * 1.15))
             face_crop = img[y1:y2, x1:x2]
             emb = _extractor.extract_from_bgr(face_crop)
             doc_embedding = emb.tolist()
