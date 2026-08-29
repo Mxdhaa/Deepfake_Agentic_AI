@@ -503,33 +503,29 @@ class VerificationService:
         deepfake_status = "NO_ANOMALY" if deepfake_score < 0.40 else "FLAGGED"
 
         # 2. Real 1:1 Live Face Match against Document Photo
-        # Extract frames from live video
-        frames = bytes_to_frames(video_bytes, max_frames=12)
-        live_embedding: Optional[np.ndarray] = None
+        # Extract candidate frontal face crops across frames to find clearest view
+        frames = bytes_to_frames(video_bytes, max_frames=16)
+        candidate_embeddings = []
 
         if frames and len(frames) > 0:
             face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-            best_face_crop = None
-            max_area = 0
 
             for frame in frames:
                 img_uint8 = (frame * 255.0).astype(np.uint8) if frame.dtype != np.uint8 and frame.max() <= 1.0 else frame.astype(np.uint8)
                 gray = cv2.cvtColor(img_uint8, cv2.COLOR_RGB2GRAY)
-                faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=3, minSize=(40, 40))
+                faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=3, minSize=(35, 35))
 
                 for fx, fy, fw, fh in faces:
-                    area = fw * fh
-                    if area > max_area:
-                        max_area = area
+                    if fw >= 30 and fh >= 30:
                         h_f, w_f = img_uint8.shape[:2]
                         y1 = max(0, fy - int(fh * 0.1))
                         y2 = min(h_f, fy + int(fh * 1.1))
                         x1 = max(0, fx - int(fw * 0.1))
                         x2 = min(w_f, fx + int(fw * 1.1))
-                        best_face_crop = cv2.cvtColor(img_uint8[y1:y2, x1:x2], cv2.COLOR_RGB2BGR)
-
-            if best_face_crop is not None and best_face_crop.size > 0:
-                live_embedding = _extractor.extract_from_bgr(best_face_crop)
+                        face_crop = cv2.cvtColor(img_uint8[y1:y2, x1:x2], cv2.COLOR_RGB2BGR)
+                        if face_crop is not None and face_crop.size > 0:
+                            emb = _extractor.extract_from_bgr(face_crop)
+                            candidate_embeddings.append(emb)
 
         # Dynamic Cosine Similarity Computation
         doc_embedding_list = session.extracted_document_portrait_embedding
@@ -539,16 +535,18 @@ class VerificationService:
         # Read calibrated thresholds from YAML config
         id_cfg = get_identity_config()
         id_thresh = id_cfg.get("thresholds", {})
-        sim_pass = float(id_thresh.get("similarity_pass", 0.50))
-        sim_fail = float(id_thresh.get("similarity_fail", 0.35))
+        sim_pass = float(id_thresh.get("similarity_pass", 0.40))
+        sim_fail = float(id_thresh.get("similarity_fail", 0.28))
 
         live_cfg = get_liveness_config()
         live_thresh = live_cfg.get("thresholds", {})
         df_borderline = float(live_thresh.get("deepfake_borderline", 0.40))
 
-        if live_embedding is not None and doc_embedding_list is not None and len(doc_embedding_list) == 512:
+        if candidate_embeddings and doc_embedding_list is not None and len(doc_embedding_list) == 512:
             doc_emb_arr = np.array(doc_embedding_list, dtype=np.float32)
-            sim_score = round(float(compute_cosine_similarity(doc_emb_arr, live_embedding)), 4)
+            # Find best match across all live frontal face crops
+            all_sims = [float(compute_cosine_similarity(doc_emb_arr, c_emb)) for c_emb in candidate_embeddings]
+            sim_score = round(float(max(all_sims)), 4) if all_sims else 0.0
 
             # Strict 3-tier thresholding dynamically driven by identity_config.yaml
             if sim_score >= sim_pass:
@@ -558,11 +556,10 @@ class VerificationService:
             else:
                 face_match_status = "NO_MATCH"
         else:
-            # Missing document face or live face detection failed -> fail closed to 0.0 NO_MATCH
             sim_score = 0.0
             face_match_status = "NO_MATCH"
             log.warning("verification_service.face_extraction_missing",
-                        has_live_face=live_embedding is not None,
+                        has_live_face=len(candidate_embeddings) > 0,
                         has_doc_face=doc_embedding_list is not None)
 
         # 4. Strictly Map Liveness & Deepfake Decisions
