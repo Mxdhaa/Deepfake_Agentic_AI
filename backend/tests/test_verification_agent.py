@@ -142,12 +142,13 @@ def test_hard_fail_prevent_override(tmp_env):
     If challenge_match is False or face similarity is below fail cutoff (< 0.35),
     the agent classification is strictly locked to NOT_VERIFIED.
     """
-    # 1. Challenge match failure
+    # 1. Challenge match failure after retry limit reached (retry_count=1)
     session_challenge_fail = _create_mock_session(
         reference_id="CP-HARD-FAIL-1",
         face_sim=0.82,
         deepfake_score=0.08,
         challenge_match=False,
+        retry_count=1,
     )
     res1 = run_verification_agent(session_challenge_fail)
     assert res1["has_hard_fail"] is True

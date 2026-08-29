@@ -126,8 +126,17 @@ def node_collect_signals(state: VerificationAgentState) -> Dict[str, Any]:
     borderline_deltas: Dict[str, float] = {}
 
     # 1. Deterministic Hard Fails
+    retry_count = int(state.get("retry_count", 0))
+
+    # Liveness challenge failure is retryable on attempt 1 (retry_count == 0).
+    # Only after exhausting retry limit (retry_count >= 1) does it become a hard failure.
     if dt.get("liveness") == "FAILED" or (not challenge_match and dt.get("liveness") not in {"CONFIRMED", "UNCERTAIN"}):
-        hard_fail_reasons.append("Liveness challenge gesture match failed or static/unresponsive video detected.")
+        if retry_count >= 1:
+            hard_fail_reasons.append("Liveness challenge gesture match failed across multiple retry attempts.")
+        else:
+            borderline_signals.append("liveness_challenge")
+            borderline_deltas["liveness_challenge"] = 1.0
+
     if not phone_verified or dt.get("phone_otp") == "FAILED":
         hard_fail_reasons.append("Cryptographic phone OTP verification failed.")
     if not document_match or dt.get("document") == "NO_MATCH":
