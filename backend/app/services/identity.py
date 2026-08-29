@@ -182,28 +182,33 @@ def compute_cosine_similarity(
 
 class FaceFeatureExtractor:
     """
-    Extracts normalized 512-d face feature embeddings using PyTorch / OpenCV.
-    No model trained from scratch.
+    Extracts normalized 512-d face feature embeddings using MTCNN face alignment + InceptionResnetV1 (VGGFace2).
     """
 
     def __init__(self) -> None:
+        self._mtcnn = None
         self._model = None
+        self._device = None
         self._initialized = False
 
     def _init_model(self) -> None:
         if self._initialized:
             return
         try:
-            import torchvision.models as models
+            from facenet_pytorch import MTCNN, InceptionResnetV1
             import torch
-            import torch.nn as nn
 
-            # Use pretrained backbone as feature extractor (evaluation mode)
-            base = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
-            base.fc = nn.Identity()  # 512-d feature vector
-            base.eval()
-            self._model = base
-            log.info("identity.feature_extractor_loaded", backbone="resnet18_512d")
+            device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+            self._device = device
+            self._mtcnn = MTCNN(
+                image_size=160,
+                margin=20,
+                post_process=True,
+                select_largest=True,
+                device=device,
+            )
+            self._model = InceptionResnetV1(pretrained="vggface2").eval().to(device)
+            log.info("identity.feature_extractor_loaded", backbone="mtcnn_inception_resnet_v1_vggface2_512d")
         except Exception as exc:
             log.warning("identity.feature_extractor_fallback", error=str(exc))
             self._model = None
@@ -226,7 +231,7 @@ class FaceFeatureExtractor:
         return self.extract_from_bgr(img)
 
     def extract_from_bgr(self, bgr_img: np.ndarray) -> np.ndarray:
-        """Extract a unit-normalized 512-d embedding from BGR image array."""
+        """Extract a unit-normalized 512-d embedding from BGR image array with MTCNN alignment."""
         self._init_model()
         import cv2
 
@@ -234,16 +239,24 @@ class FaceFeatureExtractor:
             try:
                 import torch
                 rgb = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2RGB)
-                resized = cv2.resize(rgb, (224, 224), interpolation=cv2.INTER_LINEAR)
-                # Standard ImageNet normalization
-                tensor = torch.from_numpy(resized).permute(2, 0, 1).float() / 255.0
-                mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
-                std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
-                tensor = (tensor - mean) / std
-                tensor = tensor.unsqueeze(0)
+                
+                face_tensor = None
+                if self._mtcnn is not None:
+                    try:
+                        face_tensor = self._mtcnn(rgb)
+                    except Exception:
+                        face_tensor = None
+
+                if face_tensor is None:
+                    resized = cv2.resize(rgb, (160, 160), interpolation=cv2.INTER_LINEAR)
+                    t = torch.from_numpy(resized).permute(2, 0, 1).float()
+                    face_tensor = (t - 127.5) / 128.0
+
+                if face_tensor.dim() == 3:
+                    face_tensor = face_tensor.unsqueeze(0)
 
                 with torch.no_grad():
-                    feat = self._model(tensor).squeeze(0).cpu().numpy()
+                    feat = self._model(face_tensor.to(self._device)).squeeze(0).cpu().numpy()
                 norm = np.linalg.norm(feat)
                 return feat / (norm + 1e-12)
             except Exception as exc:
