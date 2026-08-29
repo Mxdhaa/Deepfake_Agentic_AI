@@ -26,6 +26,8 @@ structlog>=24.0.0
 rich>=13.0.0
 aiofiles>=23.0.0
 PyYAML>=6.0.0
+rapidfuzz>=3.0.0
+easyocr>=1.7.0
 
 # ─── ML / Fusion Classifier ───────────────────────────────────────────────────
 scikit-learn>=1.4.0

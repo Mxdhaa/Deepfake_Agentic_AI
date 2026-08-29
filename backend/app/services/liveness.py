@@ -284,6 +284,7 @@ def detect_sequential_motion(
     dy_values: List[float] = []
 
     face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    profile_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_profileface.xml")
     face_centers_x: List[float] = []
     face_centers_y: List[float] = []
 
@@ -298,8 +299,18 @@ def detect_sequential_motion(
         gray = cv2.cvtColor(img_uint8, cv2.COLOR_RGB2GRAY)
         h, w = gray.shape
 
-        # Track face bounding box and center if visible
-        detected_faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=3, minSize=(40, 40))
+        # Track face bounding box and center with frontal + profile fallback
+        detected_faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=3, minSize=(35, 35))
+        if len(detected_faces) == 0:
+            detected_faces = profile_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=3, minSize=(35, 35))
+        if len(detected_faces) == 0:
+            # Flipped profile to catch left/right asymmetry in Haar cascades
+            flipped_gray = cv2.flip(gray, 1)
+            flipped_profiles = profile_cascade.detectMultiScale(flipped_gray, scaleFactor=1.1, minNeighbors=3, minSize=(35, 35))
+            if len(flipped_profiles) > 0:
+                pfx, pfy, pfw, pfh = flipped_profiles[0]
+                detected_faces = np.array([[w - (pfx + pfw), pfy, pfw, pfh]])
+
         fx, fy, fw, fh = 0, 0, w, h
         has_face_box = False
         if len(detected_faces) > 0:

@@ -151,6 +151,48 @@ def _parse_dob_components(dob_str: str) -> Tuple[Optional[int], Optional[int], O
     return None, None, None
 
 
+import difflib
+
+
+def _fuzzy_partial_ratio(s1: str, s2: str) -> float:
+    """Standard library difflib sliding window partial ratio."""
+    if not s1 or not s2:
+        return 0.0
+    s1, s2 = s1.upper().strip(), s2.upper().strip()
+    if s1 in s2:
+        return 100.0
+    if len(s1) > len(s2):
+        s1, s2 = s2, s1
+    len_s1 = len(s1)
+    best = 0.0
+    for i in range(len(s2) - len_s1 + 1):
+        sub = s2[i : i + len_s1]
+        ratio = difflib.SequenceMatcher(None, s1, sub).ratio() * 100.0
+        if ratio > best:
+            best = ratio
+    return best
+
+
+def _fuzzy_token_set_ratio(s1: str, s2: str) -> float:
+    """Standard library token set ratio."""
+    t1 = set(s1.upper().split())
+    t2 = set(s2.upper().split())
+    if not t1 or not t2:
+        return 0.0
+    intersection = t1.intersection(t2)
+    if not intersection:
+        return _fuzzy_partial_ratio(s1, s2)
+    common_ratio = (2.0 * len(intersection)) / (len(t1) + len(t2)) * 100.0
+    return max(common_ratio, _fuzzy_partial_ratio(s1, s2))
+
+
+def _fuzzy_token_sort_ratio(s1: str, s2: str) -> float:
+    """Standard library token sort ratio."""
+    s1_sorted = " ".join(sorted(s1.upper().split()))
+    s2_sorted = " ".join(sorted(s2.upper().split()))
+    return difflib.SequenceMatcher(None, s1_sorted, s2_sorted).ratio() * 100.0
+
+
 def parse_and_validate_id_document(
     img_bgr: np.ndarray,
     expected_name: str,
@@ -162,8 +204,6 @@ def parse_and_validate_id_document(
     matches expected_name and expected_dob with robust support for Aadhaar,
     PAN, Voter ID, and Passports.
     """
-    from rapidfuzz import fuzz
-
     raw_text = extract_document_text(img_bgr)
     clean_ocr = " ".join(raw_text.split()).upper()
     log.info("ocr.extracted_text", raw_text=clean_ocr[:250])
@@ -203,16 +243,23 @@ def parse_and_validate_id_document(
     extracted_id_number = aadhaar_match.group(0) if aadhaar_match else (pan_match.group(0) if pan_match else None)
 
     if clean_ocr:
-        # 1. Flexible Name Matching
-        name_ratio = float(fuzz.partial_ratio(clean_exp_name, clean_ocr))
-        token_set_ratio = float(fuzz.token_set_ratio(clean_exp_name, clean_ocr))
-        token_sort_ratio = float(fuzz.token_sort_ratio(clean_exp_name, clean_ocr))
+        # 1. Flexible Name Matching with RapidFuzz / Difflib fallback
+        try:
+            from rapidfuzz import fuzz
+            name_ratio = float(fuzz.partial_ratio(clean_exp_name, clean_ocr))
+            token_set_ratio = float(fuzz.token_set_ratio(clean_exp_name, clean_ocr))
+            token_sort_ratio = float(fuzz.token_sort_ratio(clean_exp_name, clean_ocr))
+        except Exception:
+            name_ratio = _fuzzy_partial_ratio(clean_exp_name, clean_ocr)
+            token_set_ratio = _fuzzy_token_set_ratio(clean_exp_name, clean_ocr)
+            token_sort_ratio = _fuzzy_token_sort_ratio(clean_exp_name, clean_ocr)
+
         best_name_score = max(name_ratio, token_set_ratio, token_sort_ratio)
 
         name_tokens = [t for t in clean_exp_name.split() if len(t) > 1]
         tokens_found = 0
         for token in name_tokens:
-            if token in clean_ocr or fuzz.partial_ratio(token, clean_ocr) >= 65.0:
+            if token in clean_ocr or _fuzzy_partial_ratio(token, clean_ocr) >= 65.0:
                 tokens_found += 1
 
         all_tokens_present = (tokens_found == len(name_tokens)) and len(name_tokens) > 0

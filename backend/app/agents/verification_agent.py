@@ -258,65 +258,106 @@ def node_reason_over_signals(state: VerificationAgentState) -> Dict[str, Any]:
     final_class = tentative_class
     explanation = ""
 
-    # Attempt LangChain / ChatOpenAI reasoning if API key configured
-    api_key = os.getenv("OPENAI_API_KEY")
-    if api_key and not api_key.startswith("sk-placeholder"):
+    # Attempt Google Gemini / OpenAI reasoning if API key configured
+    gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or getattr(settings, "GEMINI_API_KEY", None) or ""
+    openai_key = os.getenv("OPENAI_API_KEY") or getattr(settings, "OPENAI_API_KEY", None) or ""
+
+    system_prompt = (
+        "You are an expert KYC & Anti-Spoofing Verification Adjudication Agent. "
+        "You receive ONLY numeric telemetry scores, decision matrix statuses, and configured policy thresholds. "
+        "CRITICAL SECURITY RULES:\n"
+        "1. If has_hard_fail is true, you MUST output classification 'NOT_VERIFIED'. Never override a hard failure.\n"
+        "2. If is_borderline is true and has_hard_fail is false, output classification 'UNDER_REVIEW'.\n"
+        "3. If all signals are nominal without hard fails or borderline signals, output classification 'VERIFIED'.\n"
+        "4. Output format must be valid JSON: {\"classification\": \"VERIFIED\"|\"NOT_VERIFIED\"|\"UNDER_REVIEW\", \"reason\": \"<grounded explanation referencing exact scores>\"}"
+    )
+    user_payload = {
+        "reference_id": state.get("reference_id"),
+        "raw_signals": raw,
+        "decision_table": state.get("decision_table"),
+        "thresholds": thresh,
+        "has_hard_fail": has_hard_fail,
+        "hard_fail_reasons": state.get("hard_fail_reasons"),
+        "is_borderline": is_borderline,
+        "borderline_signals": state.get("borderline_signals"),
+        "borderline_deltas": state.get("borderline_deltas"),
+    }
+
+    content = ""
+    # Tier 1: Google Gemini (if GEMINI_API_KEY / GOOGLE_API_KEY configured)
+    if str(gemini_key).strip() and not str(gemini_key).startswith("placeholder"):
+        gemini_model = os.getenv("GEMINI_MODEL") or "gemini-3.5-flash-lite"
         try:
-            from langchain_core.messages import HumanMessage, SystemMessage
-            from langchain_openai import ChatOpenAI
-
-            llm = ChatOpenAI(
-                model=os.getenv("AGENT_MODEL_NAME", "gpt-4o-mini"),
-                temperature=0.0,
-                max_tokens=250,
-                timeout=10.0,
+            import httpx
+            gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_key}"
+            resp = httpx.post(
+                gemini_url,
+                headers={"x-goog-api-key": gemini_key, "Content-Type": "application/json"},
+                json={
+                    "contents": [{
+                        "parts": [{
+                            "text": f"{system_prompt}\n\nEvaluate the following verification telemetry:\n{user_payload}"
+                        }]
+                    }],
+                    "generationConfig": {
+                        "temperature": 0.0,
+                        "responseMimeType": "application/json",
+                    }
+                },
+                timeout=4.0,
             )
+            if resp.status_code == 200:
+                data = resp.json()
+                content = str(data["candidates"][0]["content"]["parts"][0]["text"]).strip()
+            else:
+                log.warning("agent.gemini_api_status", status=resp.status_code, error=resp.text[:120])
+        except Exception as gemini_exc:
+            log.warning("agent.gemini_call_failed", error=str(gemini_exc))
 
-            system_prompt = (
-                "You are an expert KYC & Anti-Spoofing Verification Adjudication Agent. "
-                "You receive ONLY numeric telemetry scores, decision matrix statuses, and configured policy thresholds. "
-                "CRITICAL SECURITY RULES:\n"
-                "1. If has_hard_fail is true, you MUST output classification 'NOT_VERIFIED'. Never override a hard failure.\n"
-                "2. If is_borderline is true and has_hard_fail is false, output classification 'UNDER_REVIEW'.\n"
-                "3. If all signals are nominal without hard fails or borderline signals, output classification 'VERIFIED'.\n"
-                "4. Output format must be valid JSON: {\"classification\": \"VERIFIED\"|\"NOT_VERIFIED\"|\"UNDER_REVIEW\", \"reason\": \"<grounded explanation referencing exact scores>\"}"
+    # Tier 2: OpenAI (if OPENAI_API_KEY configured and content not already obtained)
+    if not content and str(openai_key).strip() and not str(openai_key).startswith("sk-placeholder") and openai_key != "sk-...":
+        openai_model = os.getenv("AGENT_MODEL_NAME") or "gpt-4o-mini"
+        try:
+            import httpx
+            resp = httpx.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={"Authorization": f"Bearer {openai_key}", "Content-Type": "application/json"},
+                json={
+                    "model": openai_model,
+                    "temperature": 0.0,
+                    "max_tokens": 250,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": f"Evaluate the following verification telemetry:\n{user_payload}"},
+                    ],
+                },
+                timeout=3.0,
             )
+            if resp.status_code == 200:
+                data = resp.json()
+                content = str(data["choices"][0]["message"]["content"]).strip()
+            else:
+                log.warning("agent.openai_api_status", status=resp.status_code, error=resp.text[:120])
+        except Exception as openai_exc:
+            log.warning("agent.openai_call_failed", error=str(openai_exc))
 
-            user_payload = {
-                "reference_id": state.get("reference_id"),
-                "raw_signals": raw,
-                "decision_table": state.get("decision_table"),
-                "thresholds": thresh,
-                "has_hard_fail": has_hard_fail,
-                "hard_fail_reasons": state.get("hard_fail_reasons"),
-                "is_borderline": is_borderline,
-                "borderline_signals": state.get("borderline_signals"),
-                "borderline_deltas": state.get("borderline_deltas"),
-            }
-
-            messages = [
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=f"Evaluate the following verification telemetry:\n{user_payload}"),
-            ]
-
-            response = llm.invoke(messages)
-            content = str(response.content).strip()
-
+    if content:
+        try:
             import json
-            if content.startswith("```"):
-                content = content.split("```")[1]
-                if content.startswith("json"):
-                    content = content[4:]
-                content = content.strip()
+            clean_c = content.strip()
+            if clean_c.startswith("```"):
+                clean_c = clean_c.split("```")[1]
+                if clean_c.startswith("json"):
+                    clean_c = clean_c[4:]
+                clean_c = clean_c.strip()
 
-            parsed = json.loads(content)
+            parsed = json.loads(clean_c)
             llm_class = parsed.get("classification", tentative_class).strip().upper()
             if llm_class in {"VERIFIED", "NOT_VERIFIED", "UNDER_REVIEW"}:
                 final_class = llm_class
             explanation = parsed.get("reason", "")
-        except Exception as exc:
-            log.warning("agent.llm_call_fallback", error=str(exc))
-            explanation = ""
+        except Exception as parse_exc:
+            log.warning("agent.llm_parse_error", error=str(parse_exc), content=content[:100])
 
     # Fail-Closed Override Protection: LLM can never override hard failures into VERIFIED
     if has_hard_fail and final_class == "VERIFIED":

@@ -46,23 +46,23 @@ frame_sampling:
 motion:
   # Minimum mean absolute pixel delta (0–255 scale) between consecutive frames
   # to count as a "motion frame". Tuned for typical 30fps webcam clips.
-  min_delta_threshold:  4.0
+  min_delta_threshold:  3.0
   # Optical flow magnitude threshold (fallback when frame-delta is insufficient)
-  flow_magnitude_min:   0.40
+  flow_magnitude_min:   0.25
   # Gesture specific directional flow thresholds
-  turn_dx_min:          0.50
-  nod_dy_min:           0.55
+  turn_dx_min:          0.28
+  nod_dy_min:           0.32
 
 # ── Sequential Head Motion Challenge ─────────────────────────────────────────
 sequential_motion:
   sequence_length:          3
   gesture_pool:             ["left", "right", "up", "down"]
-  turn_dx_min:              0.50
-  nod_dy_min:               0.55
-  peak_min_gap_frames:      4
-  min_peak_sustain_frames:  2
-  min_excursion_mag:        0.70
-  flow_magnitude_min:       0.40
+  turn_dx_min:              0.28
+  nod_dy_min:               0.32
+  peak_min_gap_frames:      2
+  min_peak_sustain_frames:  1
+  min_excursion_mag:        0.38
+  flow_magnitude_min:       0.25
 
 # ── Penalty Functions ─────────────────────────────────────────────────────────
 # Penalty values fed into the weighted sum are always clamped to [0.0, 1.0].
