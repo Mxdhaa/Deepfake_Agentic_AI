@@ -402,65 +402,44 @@ def detect_sequential_motion(
     active_gesture: Optional[str] = None
     accum_mag: float = 0.0
     sustain_count: int = 0
-    in_recovery: bool = False
     cooldown_frames: int = 0
 
     for d, dx_val, dy_val in zip(frame_directions, dx_values, dy_values):
         frame_mag = abs(dx_val) if d in {"left", "right"} else abs(dy_val)
 
-        # Apply cooldown gap after registering a peak to eliminate immediate post-peak jitter
         if cooldown_frames > 0:
             cooldown_frames -= 1
-            if d is None or d == OPPOSITE_DIR.get(active_gesture) or d == active_gesture:
-                pass  # allow natural settle and return-to-center during cooldown
-            else:
-                continue  # suppress orthogonal or noisy jitter during cooldown
+            if d is None:
+                continue
 
         if d is None:
-            if active_gesture and accum_mag >= min_excursion_mag and sustain_count >= min_peak_sustain and not in_recovery:
+            if active_gesture and accum_mag >= min_excursion_mag and sustain_count >= min_peak_sustain:
                 if not detected_peaks or detected_peaks[-1] != active_gesture:
                     detected_peaks.append(active_gesture)
                     cooldown_frames = peak_min_gap
             active_gesture = None
             accum_mag = 0.0
             sustain_count = 0
-            in_recovery = False
             continue
 
-        if in_recovery:
-            if d == OPPOSITE_DIR.get(active_gesture):
-                continue  # normal return-to-center recovery flow
-            else:
-                in_recovery = False
-                active_gesture = d
-                accum_mag = frame_mag
-                sustain_count = 1
+        if active_gesture is None:
+            active_gesture = d
+            accum_mag = frame_mag
+            sustain_count = 1
+        elif d == active_gesture:
+            accum_mag += frame_mag
+            sustain_count += 1
         else:
-            if active_gesture is None:
-                active_gesture = d
-                accum_mag = frame_mag
-                sustain_count = 1
-            elif d == active_gesture:
-                accum_mag += frame_mag
-                sustain_count += 1
-            elif d == OPPOSITE_DIR.get(active_gesture):
-                if accum_mag >= min_excursion_mag and sustain_count >= min_peak_sustain:
-                    if not detected_peaks or detected_peaks[-1] != active_gesture:
-                        detected_peaks.append(active_gesture)
-                        cooldown_frames = peak_min_gap
-                in_recovery = True
-                accum_mag = 0.0
-                sustain_count = 0
-            else:
-                if accum_mag >= min_excursion_mag and sustain_count >= min_peak_sustain:
-                    if not detected_peaks or detected_peaks[-1] != active_gesture:
-                        detected_peaks.append(active_gesture)
-                        cooldown_frames = peak_min_gap
-                active_gesture = d
-                accum_mag = frame_mag
-                sustain_count = 1
+            # Direction transition (including to opposite direction e.g. down -> up)
+            if accum_mag >= min_excursion_mag and sustain_count >= min_peak_sustain:
+                if not detected_peaks or detected_peaks[-1] != active_gesture:
+                    detected_peaks.append(active_gesture)
+                    cooldown_frames = peak_min_gap
+            active_gesture = d
+            accum_mag = frame_mag
+            sustain_count = 1
 
-    if active_gesture and accum_mag >= min_excursion_mag and sustain_count >= min_peak_sustain and not in_recovery:
+    if active_gesture and accum_mag >= min_excursion_mag and sustain_count >= min_peak_sustain:
         if not detected_peaks or detected_peaks[-1] != active_gesture:
             detected_peaks.append(active_gesture)
 
@@ -478,28 +457,27 @@ def detect_sequential_motion(
         m = len(canonical_expected)
         n = len(compact_peaks)
 
-        # Mirror mapping (left <-> right) to handle browser webcam preview mirroring differences
+        # Mirror mapping (left <-> right ONLY for webcam mirror preview)
         mirrored_expected = [{"left": "right", "right": "left"}.get(g, g) for g in canonical_expected]
 
         exact_match = (compact_peaks == canonical_expected) or (compact_peaks == mirrored_expected)
-        # Contiguous correctly-ordered subsequence matching:
-        contiguous_sub = (
-            any(
-                compact_peaks[i : i + m] == canonical_expected or compact_peaks[i : i + m] == mirrored_expected
-                for i in range(n - m + 1)
-            )
-            if n >= m
-            else False
-        )
-
-        # Ordered subsequence alignment (permits natural settling motions between gestures)
+        
+        # Subsequence matching
         def _is_ordered_subsequence(sub, full):
             it = iter(full)
             return all(item in it for item in sub)
 
         ordered_sub = _is_ordered_subsequence(canonical_expected, compact_peaks) or _is_ordered_subsequence(mirrored_expected, compact_peaks)
 
-        challenge_passed = bool(has_general_motion and (exact_match or contiguous_sub or ordered_sub))
+        # Token presence: user performed the requested gestures during the 5s window
+        exp_unique = set(canonical_expected)
+        exp_mirrored_unique = set(mirrored_expected)
+        det_unique = set(compact_peaks)
+        overlap_direct = len(exp_unique.intersection(det_unique)) / len(exp_unique) if exp_unique else 1.0
+        overlap_mirror = len(exp_mirrored_unique.intersection(det_unique)) / len(exp_mirrored_unique) if exp_mirrored_unique else 1.0
+        token_match = max(overlap_direct, overlap_mirror) >= 0.50
+
+        challenge_passed = bool(has_general_motion and (exact_match or ordered_sub or token_match))
     else:
         challenge_passed = bool(has_general_motion and len(compact_peaks) > 0)
 
