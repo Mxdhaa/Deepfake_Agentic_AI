@@ -154,16 +154,15 @@ def node_collect_signals(state: VerificationAgentState) -> Dict[str, Any]:
     has_hard_fail = len(hard_fail_reasons) > 0
 
     # 2. Config-Driven Borderline Gate Evaluation
-    # Deepfake score straddling threshold (strictly symmetric +-0.05 band around deepfake_borderline = 0.40 -> [0.35, 0.45])
-    if abs(df_delta) <= 0.05:
+    # Deepfake score in borderline tier [df_borderline, df_fail) -> [0.40, 0.75)
+    if df_borderline <= deepfake_score < df_fail:
         borderline_signals.append("deepfake_score")
-        borderline_deltas["deepfake_delta_from_borderline"] = df_delta
+        borderline_deltas["deepfake_delta_from_borderline"] = round(deepfake_score - df_borderline, 4)
 
-    # Face similarity straddling similarity_pass within +-0.05 or in uncertain zone [sim_fail, sim_pass)
-    sim_delta = round(face_sim - sim_pass, 4)
-    if abs(sim_delta) <= 0.05 or (sim_fail <= face_sim < sim_pass):
+    # Face similarity strictly in uncertain zone [sim_fail, sim_pass) -> [0.28, 0.40)
+    if sim_fail <= face_sim < sim_pass:
         borderline_signals.append("face_similarity")
-        borderline_deltas["similarity_delta_from_pass"] = sim_delta
+        borderline_deltas["similarity_delta_from_pass"] = round(face_sim - sim_pass, 4)
 
     # OCR confidence borderline
     if 0.70 <= ocr_conf <= 0.85:
