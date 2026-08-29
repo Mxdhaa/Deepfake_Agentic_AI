@@ -535,8 +535,8 @@ class VerificationService:
         # Read calibrated thresholds from YAML config
         id_cfg = get_identity_config()
         id_thresh = id_cfg.get("thresholds", {})
-        sim_pass = float(id_thresh.get("similarity_pass", 0.40))
-        sim_fail = float(id_thresh.get("similarity_fail", 0.28))
+        sim_pass = float(id_thresh.get("similarity_pass", 0.50))
+        sim_fail = float(id_thresh.get("similarity_fail", 0.35))
 
         live_cfg = get_liveness_config()
         live_thresh = live_cfg.get("thresholds", {})

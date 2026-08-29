@@ -16,8 +16,8 @@
 config_version: "v1.1-stage2"
 
 thresholds:
-  similarity_pass: 0.40         # cosine_similarity >= 0.40 -> MATCH (calibrated for printed ID card vs live webcam)
-  similarity_fail: 0.28         # cosine_similarity < 0.28 -> NO_MATCH
+  similarity_pass: 0.50         # cosine_similarity >= 0.50 -> MATCH (strict biometric pass)
+  similarity_fail: 0.35         # cosine_similarity < 0.35 -> NO_MATCH (hard fail cutoff)
   fuzzy_name_min_ratio: 70      # minimum fuzzy match score for name verification
   fuzzy_dob_min_ratio: 80       # minimum fuzzy match score for date of birth verification
   velocity_borderline: 3        # registry_velocity >= 3 -> borderline tier
