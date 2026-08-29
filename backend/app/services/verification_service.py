@@ -569,6 +569,7 @@ class VerificationService:
 
         session.challenge_type = ",".join(expected_seq) if isinstance(expected_seq, list) else str(expected_seq)
         session.challenge_sequence = expected_seq if isinstance(expected_seq, list) else [str(expected_seq)]
+        session.detected_sequence = detected_seq if isinstance(detected_seq, list) else [str(detected_seq)]
         session.challenge_match = challenge_match
         session.deepfake_score = deepfake_score
         session.detection_mode = detection_mode

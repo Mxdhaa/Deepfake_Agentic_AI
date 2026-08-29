@@ -23,6 +23,40 @@ log = get_logger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan: startup → yield → shutdown."""
     setup_logging()
+    
+    # Load and explicitly log active runtime configuration to prevent silent config drift
+    try:
+        from app.services.liveness import get_liveness_config
+        from app.services.identity import get_identity_config
+        live_cfg = get_liveness_config()
+        id_cfg = get_identity_config()
+        
+        seq_motion = live_cfg.get("sequential_motion", {})
+        live_thresh = live_cfg.get("thresholds", {})
+        id_thresh = id_cfg.get("thresholds", {})
+        
+        log.info(
+            "config.active_runtime_thresholds",
+            config_versions={"liveness": live_cfg.get("config_version"), "identity": id_cfg.get("config_version")},
+            sequential_motion={
+                "turn_dx_min": seq_motion.get("turn_dx_min"),
+                "nod_dy_min": seq_motion.get("nod_dy_min"),
+                "min_excursion_mag": seq_motion.get("min_excursion_mag"),
+                "min_peak_sustain_frames": seq_motion.get("min_peak_sustain_frames"),
+                "flow_magnitude_min": seq_motion.get("flow_magnitude_min"),
+            },
+            biometric_cutoffs={
+                "similarity_pass": id_thresh.get("similarity_pass"),
+                "similarity_fail": id_thresh.get("similarity_fail"),
+            },
+            anomaly_cutoffs={
+                "deepfake_borderline": live_thresh.get("deepfake_borderline"),
+                "deepfake_fail": live_thresh.get("deepfake_fail"),
+            },
+        )
+    except Exception as cfg_exc:
+        log.warning("config.startup_inspect_failed", error=str(cfg_exc))
+
     log.info("deepfake_agent.startup", version="0.1.0", env=settings.ENVIRONMENT)
     
     # Pre-warm OCR reader in background so user requests don't hit cold-start timeouts
@@ -83,8 +117,34 @@ async def root():
 
 @app.get("/health", tags=["Meta"])
 async def health_check():
-    """Quick liveness probe for load balancers / Vercel rewrites."""
-    return {"status": "ok", "version": "0.1.0"}
+    """Quick liveness probe with runtime config snapshot to prevent silent drift."""
+    try:
+        from app.services.liveness import get_liveness_config
+        from app.services.identity import get_identity_config
+        live_cfg = get_liveness_config()
+        id_cfg = get_identity_config()
+        return {
+            "status": "ok",
+            "version": "0.1.0",
+            "active_thresholds": {
+                "sequential_motion": live_cfg.get("sequential_motion", {}),
+                "liveness_thresholds": live_cfg.get("thresholds", {}),
+                "identity_thresholds": id_cfg.get("thresholds", {}),
+            }
+        }
+    except Exception as exc:
+        return {"status": "ok", "version": "0.1.0", "config_error": str(exc)}
+
+
+@app.get("/api/v1/config/active", tags=["Meta"])
+async def get_active_config():
+    """Exposes fully resolved runtime YAML configurations for pre-demo sanity validation."""
+    from app.services.liveness import get_liveness_config
+    from app.services.identity import get_identity_config
+    return {
+        "liveness": get_liveness_config(),
+        "identity": get_identity_config(),
+    }
 
 
 if __name__ == "__main__":

@@ -255,13 +255,13 @@ def detect_sequential_motion(
     """
     cfg = _load_config()
     seq_cfg = cfg.get("sequential_motion", {})
-    turn_dx_min = float(seq_cfg.get("turn_dx_min", 0.45))
-    nod_dy_min = float(seq_cfg.get("nod_dy_min", 0.50))
-    peak_min_gap = int(seq_cfg.get("peak_min_gap_frames", 3))
-    min_peak_sustain = int(seq_cfg.get("min_peak_sustain_frames", 2))
-    min_excursion_mag = float(seq_cfg.get("min_excursion_mag", 0.60))
-    min_flow_mag = float(seq_cfg.get("flow_magnitude_min", 0.30))
-    threshold = float(cfg.get("motion", {}).get("min_delta_threshold", 4.0))
+    turn_dx_min = float(seq_cfg.get("turn_dx_min", 0.28))
+    nod_dy_min = float(seq_cfg.get("nod_dy_min", 0.32))
+    peak_min_gap = int(seq_cfg.get("peak_min_gap_frames", 2))
+    min_peak_sustain = int(seq_cfg.get("min_peak_sustain_frames", 1))
+    min_excursion_mag = float(seq_cfg.get("min_excursion_mag", 0.38))
+    min_flow_mag = float(seq_cfg.get("flow_magnitude_min", 0.25))
+    threshold = float(cfg.get("motion", {}).get("min_delta_threshold", 3.0))
 
     canonical_expected = [_canonicalize_gesture_token(g) for g in (expected_sequence or []) if g]
 
@@ -403,6 +403,7 @@ def detect_sequential_motion(
     accum_mag: float = 0.0
     sustain_count: int = 0
     cooldown_frames: int = 0
+    expecting_recovery: Optional[str] = None
 
     for d, dx_val, dy_val in zip(frame_directions, dx_values, dy_values):
         frame_mag = abs(dx_val) if d in {"left", "right"} else abs(dy_val)
@@ -414,8 +415,11 @@ def detect_sequential_motion(
 
         if d is None:
             if active_gesture and accum_mag >= min_excursion_mag and sustain_count >= min_peak_sustain:
-                if not detected_peaks or detected_peaks[-1] != active_gesture:
+                if expecting_recovery and active_gesture == expecting_recovery:
+                    expecting_recovery = None
+                elif not detected_peaks or detected_peaks[-1] != active_gesture:
                     detected_peaks.append(active_gesture)
+                    expecting_recovery = OPPOSITE_DIR.get(active_gesture)
                     cooldown_frames = peak_min_gap
             active_gesture = None
             accum_mag = 0.0
@@ -430,18 +434,22 @@ def detect_sequential_motion(
             accum_mag += frame_mag
             sustain_count += 1
         else:
-            # Direction transition (including to opposite direction e.g. down -> up)
+            # Direction transition (including to opposite recovery stroke)
             if accum_mag >= min_excursion_mag and sustain_count >= min_peak_sustain:
-                if not detected_peaks or detected_peaks[-1] != active_gesture:
+                if expecting_recovery and active_gesture == expecting_recovery:
+                    expecting_recovery = None
+                elif not detected_peaks or detected_peaks[-1] != active_gesture:
                     detected_peaks.append(active_gesture)
+                    expecting_recovery = OPPOSITE_DIR.get(active_gesture)
                     cooldown_frames = peak_min_gap
             active_gesture = d
             accum_mag = frame_mag
             sustain_count = 1
 
     if active_gesture and accum_mag >= min_excursion_mag and sustain_count >= min_peak_sustain:
-        if not detected_peaks or detected_peaks[-1] != active_gesture:
-            detected_peaks.append(active_gesture)
+        if not (expecting_recovery and active_gesture == expecting_recovery):
+            if not detected_peaks or detected_peaks[-1] != active_gesture:
+                detected_peaks.append(active_gesture)
 
     # Collapse consecutive duplicates
     compact_peaks: List[str] = []

@@ -91,6 +91,7 @@ class VerificationSession(BaseModel):
     detection_mode: Optional[str] = "heuristic_fallback"
     challenge_type: Optional[str] = None
     challenge_sequence: Optional[List[str]] = None
+    detected_sequence: Optional[List[str]] = None
     challenge_match: bool = False
     
     # Decision Matrix & Finalization

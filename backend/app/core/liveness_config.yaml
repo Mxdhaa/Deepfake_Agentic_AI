@@ -57,12 +57,12 @@ motion:
 sequential_motion:
   sequence_length:          3
   gesture_pool:             ["left", "right", "up", "down"]
-  turn_dx_min:              0.85
-  nod_dy_min:               0.90
+  turn_dx_min:              0.28
+  nod_dy_min:               0.32
   peak_min_gap_frames:      2
-  min_peak_sustain_frames:  2
-  min_excursion_mag:        1.60
-  flow_magnitude_min:       0.35
+  min_peak_sustain_frames:  1
+  min_excursion_mag:        0.38
+  flow_magnitude_min:       0.25
 
 # ── Penalty Functions ─────────────────────────────────────────────────────────
 # Penalty values fed into the weighted sum are always clamped to [0.0, 1.0].

@@ -578,6 +578,8 @@ def run_verification_agent(
         "document_match": getattr(session, "document_match", False),
         "detection_mode": getattr(session, "detection_mode", "heuristic_fallback"),
         "ocr_confidence": session.document_details.get("ocr_confidence", 1.0) if session.document_details else 1.0,
+        "expected_sequence": getattr(session, "challenge_sequence", None),
+        "detected_sequence": getattr(session, "detected_sequence", None),
     }
 
     initial_state: VerificationAgentState = {
