@@ -138,10 +138,11 @@ def node_collect_signals(state: VerificationAgentState) -> Dict[str, Any]:
         hard_fail_reasons.append(
             f"Face biometric similarity ({face_sim:.4f}) is below the minimum fail cutoff ({sim_fail:.2f})."
         )
-    df_delta = round(deepfake_score - df_borderline, 4)
-    if deepfake_score >= df_fail or (dt.get("deepfake_analysis") == "FLAGGED" and abs(df_delta) > 0.05):
+    df_upper_band = round(df_borderline + 0.05, 4)  # 0.45
+    df_lower_band = round(df_borderline - 0.05, 4)  # 0.35
+    if deepfake_score >= df_fail or deepfake_score > df_upper_band or dt.get("deepfake_analysis") == "FLAGGED" and deepfake_score > df_upper_band:
         hard_fail_reasons.append(
-            f"Deepfake anomaly score ({deepfake_score:.4f}) exceeded allowable threshold ({df_borderline:.2f} + 0.05)."
+            f"Deepfake anomaly score ({deepfake_score:.4f}) exceeded allowable threshold ({df_upper_band:.2f})."
         )
     if (
         dt.get("identity_record") == "NO_MATCH"
@@ -154,8 +155,8 @@ def node_collect_signals(state: VerificationAgentState) -> Dict[str, Any]:
     has_hard_fail = len(hard_fail_reasons) > 0
 
     # 2. Config-Driven Borderline Gate Evaluation
-    # Deepfake score in borderline tier [df_borderline, df_fail) -> [0.40, 0.75)
-    if df_borderline <= deepfake_score < df_fail:
+    # Deepfake score in strict symmetric borderline band [df_borderline - 0.05, df_borderline + 0.05] -> [0.35, 0.45]
+    if df_lower_band <= deepfake_score <= df_upper_band:
         borderline_signals.append("deepfake_score")
         borderline_deltas["deepfake_delta_from_borderline"] = round(deepfake_score - df_borderline, 4)
 

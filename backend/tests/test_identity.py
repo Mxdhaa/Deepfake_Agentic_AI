@@ -376,7 +376,67 @@ def test_api_config_endpoint():
     assert resp.status_code == 200
     body = resp.json()
     assert "thresholds" in body
-    assert body["thresholds"]["similarity_pass"] == 0.50
+    assert body["thresholds"]["similarity_pass"] == 0.55
     assert body["thresholds"]["similarity_fail"] == 0.35
     assert body["thresholds"]["velocity_borderline"] == 3
     assert body["thresholds"]["velocity_fail"] == 6
+
+
+def test_face_feature_extractor_alignment_modes_and_fallback_auditing():
+    """
+    Validates that FaceFeatureExtractor explicitly identifies and audits detection modes:
+      - Real face photo -> 'mtcnn_aligned'
+      - Pure noise / blank canvas -> 'unaligned_direct'
+      - Empty bytes -> 'empty_input'
+    """
+    from app.services.identity import FaceFeatureExtractor
+
+    ext = FaceFeatureExtractor()
+
+    # 1. Empty input
+    emb_empty, mode_empty = ext.extract_from_bytes(b"", return_mode=True)
+    assert mode_empty == "empty_input"
+    assert np.all(emb_empty == 0.0)
+    assert len(emb_empty) == 512
+
+    # 2. Blank / Non-face noise image
+    blank = np.zeros((120, 120, 3), dtype=np.uint8)
+    emb_blank, mode_blank = ext.extract_from_bgr(blank, return_mode=True)
+    assert mode_blank in {"unaligned_direct", "haar_fallback", "heuristic_histogram_fallback"}
+    assert len(emb_blank) == 512
+    assert pytest.approx(np.linalg.norm(emb_blank), abs=1e-4) == 1.0
+
+    # 3. Real human face photo
+    ffpp_dir = Path("data/ffpp_airtight/processed_images")
+    if ffpp_dir.exists():
+        ffpp_files = list(ffpp_dir.glob("*.jpg"))
+        if ffpp_files:
+            import cv2
+            real_bgr = cv2.imread(str(ffpp_files[0]))
+            emb_real, mode_real = ext.extract_from_bgr(real_bgr, return_mode=True)
+            assert mode_real == "mtcnn_aligned"
+            assert len(emb_real) == 512
+            assert pytest.approx(np.linalg.norm(emb_real), abs=1e-4) == 1.0
+
+
+def test_evaluate_identity_images_audits_detection_modes(tmp_storage, tmp_audit_chain):
+    """Asserts that evaluate_identity_images captures and returns live and ckyc detection modes."""
+    import cv2
+
+    img1 = np.full((160, 160, 3), 200, dtype=np.uint8)
+    img2 = np.full((160, 160, 3), 150, dtype=np.uint8)
+    _, buf1 = cv2.imencode(".jpg", img1)
+    _, buf2 = cv2.imencode(".jpg", img2)
+
+    res = evaluate_identity_images(
+        live_image_bytes=buf1.tobytes(),
+        ckyc_image_bytes=buf2.tobytes(),
+        kin_token="KIN-AUDIT-TEST",
+        device_id="DEV-AUDIT-TEST",
+    )
+
+    assert "live_detection_mode" in res
+    assert "ckyc_detection_mode" in res
+    assert res["live_detection_mode"] is not None
+    assert res["ckyc_detection_mode"] is not None
+

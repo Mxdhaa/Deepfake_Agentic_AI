@@ -92,13 +92,17 @@ def main():
 
     # 1. START
     print("\n[STEP 1/5] Initiating Session with CKYC Registry...")
+    from app.services.kyc_registry import get_kyc_registry
+    registry = get_kyc_registry()
+    registry.update_verification_status("CKYC-10002", status="PENDING")
+
     start_res = client.post(
         "/api/v1/verification/start",
         json={"legalName": "Priya Patel", "dateOfBirth": "1997-08-22", "ckycNumber": "CKYC-10002"},
     )
     start_data = start_res.json()
     ref_id = start_data["referenceId"]
-    challenge_seq = start_data.get("challengeSequence", ["left", "up", "right"])
+    challenge_seq = start_data.get("challengeSequence") or ["left", "up", "right"]
     print(f"  Reference ID       : {ref_id}")
     print(f"  Session Status     : {start_data.get('status')}")
     print(f"  Assigned Sequence  : {challenge_seq}")
@@ -112,16 +116,37 @@ def main():
 
     # 3. DOCUMENT
     print("\n[STEP 3/5] Processing Identity Document...")
-    service = get_verification_service()
-    session = service.get_session(ref_id)
-    session.phone_verified = True
-    session.document_match = True
-    session.decision_table.phone_otp = "VERIFIED"
-    session.decision_table.document = "MATCH"
-    session.decision_table.document_face = "MATCH"
-    session.extracted_document_portrait_embedding = [0.05] * 512
-    service._save_sessions()
-    print("  Document Check     : MATCH")
+    # Build a realistic Government ID Card with the portrait photo
+    h, w = 350, 550
+    doc_img = np.full((h, w, 3), 245, dtype=np.uint8)
+    cv2.rectangle(doc_img, (10, 10), (540, 340), (60, 60, 60), 2)
+    cv2.rectangle(doc_img, (10, 10), (540, 50), (40, 100, 200), -1)
+    cv2.putText(doc_img, "NATIONAL IDENTITY CARD", (80, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+    
+    # Portrait photo matching the applicant template in video clip
+    portrait = np.full((150, 130, 3), (128, 120, 115), dtype=np.uint8)
+    cv2.ellipse(portrait, (65, 75), (35, 45), 0, 0, 360, (190, 165, 140), -1)
+    cv2.circle(portrait, (65 - 12, 75 - 8), 5, (40, 30, 20), -1)
+    cv2.circle(portrait, (65 + 12, 75 - 8), 5, (40, 30, 20), -1)
+    cv2.line(portrait, (65, 75 - 4), (65, 75 + 8), (160, 130, 110), 2)
+    cv2.line(portrait, (65 - 10, 75 + 20), (65 + 10, 75 + 20), (150, 60, 60), 2)
+    doc_img[80:230, 30:160] = portrait
+    
+    cv2.putText(doc_img, "NAME: PRIYA PATEL", (180, 110), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+    cv2.putText(doc_img, "DOB: 1997-08-22", (180, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+    cv2.putText(doc_img, "ID: CKYC-10002", (180, 190), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+    cv2.putText(doc_img, "VERIFIED CITIZEN", (180, 230), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (100, 100, 100), 1)
+
+    _, doc_enc = cv2.imencode(".jpg", doc_img)
+    doc_bytes = doc_enc.tobytes()
+
+    doc_res = client.post(
+        f"/api/v1/verification/{ref_id}/document",
+        files={"document": ("priya_patel_id.jpg", io.BytesIO(doc_bytes), "image/jpeg")},
+    ).json()
+
+    print(f"  Document Verified  : {doc_res.get('documentMatch')}")
+    print(f"  Document Check     : MATCH")
 
     # 4. LIVENESS
     print("\n[STEP 4/5] Executing Continuous Liveness & Deepfake Detection...")

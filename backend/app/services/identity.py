@@ -183,6 +183,10 @@ def compute_cosine_similarity(
 class FaceFeatureExtractor:
     """
     Extracts normalized 512-d face feature embeddings using MTCNN face alignment + InceptionResnetV1 (VGGFace2).
+    Tracks and audits face alignment mode:
+      - 'mtcnn_aligned': Full 5-point landmark detection and affine rotation alignment.
+      - 'haar_fallback': Haar cascade bounding box crop + normalization fallback.
+      - 'unaligned_direct': Direct frame resize fallback.
     """
 
     def __init__(self) -> None:
@@ -208,17 +212,22 @@ class FaceFeatureExtractor:
                 device=device,
             )
             self._model = InceptionResnetV1(pretrained="vggface2").eval().to(device)
-            log.info("identity.feature_extractor_loaded", backbone="mtcnn_inception_resnet_v1_vggface2_512d")
+            log.info("identity.feature_extractor_loaded", backbone="mtcnn_inception_resnet_v1_vggface2_512d", device=str(device))
         except Exception as exc:
             log.warning("identity.feature_extractor_fallback", error=str(exc))
             self._model = None
         self._initialized = True
 
-    def extract_from_bytes(self, image_bytes: bytes) -> np.ndarray:
-        """Extract a unit-normalized 512-d embedding from image bytes."""
+    def extract_from_bytes(
+        self,
+        image_bytes: bytes,
+        return_mode: bool = False,
+    ) -> Union[np.ndarray, Tuple[np.ndarray, str]]:
+        """Extract a unit-normalized 512-d embedding from image bytes with optional alignment mode audit."""
         self._init_model()
         if len(image_bytes) == 0:
-            return np.zeros(512, dtype=np.float32)
+            zero_vec = np.zeros(512, dtype=np.float32)
+            return (zero_vec, "empty_input") if return_mode else zero_vec
 
         import cv2
 
@@ -226,14 +235,28 @@ class FaceFeatureExtractor:
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         if img is None:
             log.warning("identity.image_decode_failed")
-            return np.zeros(512, dtype=np.float32)
+            zero_vec = np.zeros(512, dtype=np.float32)
+            return (zero_vec, "decode_failed") if return_mode else zero_vec
 
-        return self.extract_from_bgr(img)
+        return self.extract_from_bgr(img, return_mode=return_mode)
 
-    def extract_from_bgr(self, bgr_img: np.ndarray) -> np.ndarray:
-        """Extract a unit-normalized 512-d embedding from BGR image array with MTCNN alignment."""
+    def extract_from_bgr(
+        self,
+        bgr_img: np.ndarray,
+        return_mode: bool = False,
+    ) -> Union[np.ndarray, Tuple[np.ndarray, str]]:
+        """
+        Extract a unit-normalized 512-d embedding from BGR image array.
+        Applies MTCNN 5-point facial landmark alignment, falling back to Haar cascade on degraded inputs.
+        """
         self._init_model()
         import cv2
+
+        if bgr_img is None or bgr_img.size == 0:
+            zero_vec = np.zeros(512, dtype=np.float32)
+            return (zero_vec, "empty_input") if return_mode else zero_vec
+
+        mode = "mtcnn_aligned"
 
         if self._model is not None:
             try:
@@ -244,11 +267,28 @@ class FaceFeatureExtractor:
                 if self._mtcnn is not None:
                     try:
                         face_tensor = self._mtcnn(rgb)
-                    except Exception:
+                    except Exception as exc:
+                        log.debug("identity.mtcnn_failed", error=str(exc))
                         face_tensor = None
 
                 if face_tensor is None:
-                    resized = cv2.resize(rgb, (160, 160), interpolation=cv2.INTER_LINEAR)
+                    # Defensive Haar / CLAHE fallback on difficult / non-photographic inputs
+                    gray = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2GRAY)
+                    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+                    clahe_gray = clahe.apply(gray)
+                    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+                    faces = face_cascade.detectMultiScale(clahe_gray, scaleFactor=1.08, minNeighbors=3, minSize=(25, 25))
+                    
+                    if len(faces) > 0:
+                        faces_sorted = sorted(faces, key=lambda b: b[2] * b[3], reverse=True)
+                        fx, fy, fw, fh = faces_sorted[0]
+                        crop = rgb[max(0, fy):fy + fh, max(0, fx):fx + fw]
+                        mode = "haar_fallback"
+                    else:
+                        crop = rgb
+                        mode = "unaligned_direct"
+
+                    resized = cv2.resize(crop, (160, 160), interpolation=cv2.INTER_LINEAR)
                     t = torch.from_numpy(resized).permute(2, 0, 1).float()
                     face_tensor = (t - 127.5) / 128.0
 
@@ -258,7 +298,8 @@ class FaceFeatureExtractor:
                 with torch.no_grad():
                     feat = self._model(face_tensor.to(self._device)).squeeze(0).cpu().numpy()
                 norm = np.linalg.norm(feat)
-                return feat / (norm + 1e-12)
+                emb = feat / (norm + 1e-12)
+                return (emb, mode) if return_mode else emb
             except Exception as exc:
                 log.error("identity.pytorch_extract_error", error=str(exc))
 
@@ -266,7 +307,8 @@ class FaceFeatureExtractor:
         gray = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2GRAY)
         resized = cv2.resize(gray, (32, 16)).flatten().astype(np.float32)
         norm = np.linalg.norm(resized)
-        return resized / (norm + 1e-12)
+        emb = resized / (norm + 1e-12)
+        return (emb, "heuristic_histogram_fallback") if return_mode else emb
 
 
 _extractor = FaceFeatureExtractor()
@@ -289,6 +331,8 @@ class IdentityMatchResult(TypedDict):
     device_id: Optional[str]
     live_sha256: Optional[str]
     ckyc_sha256: Optional[str]
+    live_detection_mode: Optional[str]
+    ckyc_detection_mode: Optional[str]
 
 
 # ─── Decision Evaluators ──────────────────────────────────────────────────────
@@ -303,6 +347,8 @@ def evaluate_identity_embeddings(
     live_sha256: Optional[str] = None,
     ckyc_sha256: Optional[str] = None,
     embedding_extraction_ms: float = 0.0,
+    live_detection_mode: Optional[str] = None,
+    ckyc_detection_mode: Optional[str] = None,
 ) -> IdentityMatchResult:
     """
     Deterministic identity evaluation on precomputed feature embeddings.
@@ -320,10 +366,10 @@ def evaluate_identity_embeddings(
     velocity = lookup_registry_velocity(kin_token=kin_token, device_id=device_id)
 
     # 3. Threshold checks
-    sim_pass_thresh = float(T["similarity_pass"])      # 0.60
-    sim_fail_thresh = float(T["similarity_fail"])      # 0.35
-    vel_border_thresh = int(T["velocity_borderline"])  # 3
-    vel_fail_thresh = int(T["velocity_fail"])          # 6
+    sim_pass_thresh = float(T.get("similarity_pass", 0.55))
+    sim_fail_thresh = float(T.get("similarity_fail", 0.35))
+    vel_border_thresh = int(T.get("velocity_borderline", 3))
+    vel_fail_thresh = int(T.get("velocity_fail", 6))
 
     # 4. Hierarchical Decision Rule (mirrors _derive_decision)
     if cos_sim < sim_fail_thresh or velocity >= vel_fail_thresh:
@@ -360,6 +406,8 @@ def evaluate_identity_embeddings(
         velocity=velocity,
         decision=decision,
         decision_latency_ms=decision_latency_ms,
+        live_mode=live_detection_mode,
+        ckyc_mode=ckyc_detection_mode,
     )
 
     return IdentityMatchResult(
@@ -377,6 +425,8 @@ def evaluate_identity_embeddings(
         device_id=device_id,
         live_sha256=live_sha256,
         ckyc_sha256=ckyc_sha256,
+        live_detection_mode=live_detection_mode,
+        ckyc_detection_mode=ckyc_detection_mode,
     )
 
 
@@ -392,7 +442,7 @@ def evaluate_identity_images(
     End-to-end identity match from raw image bytes:
       1. Immediate SHA-256 computation on raw wire bytes.
       2. Storage archival before processing.
-      3. Embedding extraction (~15-30ms).
+      3. Embedding extraction with MTCNN alignment and mode tracking (~15-30ms).
       4. Deterministic decision evaluation (< 2ms).
     """
     sid = session_id or str(uuid.uuid4())
@@ -418,9 +468,9 @@ def evaluate_identity_images(
     except Exception as exc:
         log.warning("identity.image_archival_failed", error=str(exc))
 
-    # Step 3: Pretrained embedding extraction
-    live_emb = _extractor.extract_from_bytes(live_image_bytes)
-    ckyc_emb = _extractor.extract_from_bytes(ckyc_image_bytes)
+    # Step 3: Pretrained embedding extraction with alignment mode tracking
+    live_emb, live_mode = _extractor.extract_from_bytes(live_image_bytes, return_mode=True)
+    ckyc_emb, ckyc_mode = _extractor.extract_from_bytes(ckyc_image_bytes, return_mode=True)
     extraction_ms = round((time.perf_counter() - t_extract_start) * 1000, 3)
 
     # Step 4: Deterministic evaluation
@@ -434,4 +484,6 @@ def evaluate_identity_images(
         live_sha256=live_sha256,
         ckyc_sha256=ckyc_sha256,
         embedding_extraction_ms=extraction_ms,
+        live_detection_mode=live_mode,
+        ckyc_detection_mode=ckyc_mode,
     )

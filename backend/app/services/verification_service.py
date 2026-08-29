@@ -357,65 +357,66 @@ class VerificationService:
             self._save_sessions()
             return False, {}, {"document_structure": "mismatch"}, "Corrupted or unreadable image file."
 
-        # 2. Real Face Detection & Feature Extraction from Document
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        clahe_gray = clahe.apply(gray)
-
-        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-        faces = face_cascade.detectMultiScale(clahe_gray, scaleFactor=1.05, minNeighbors=2, minSize=(20, 20))
-        if len(faces) == 0:
-            faces = face_cascade.detectMultiScale(gray, scaleFactor=1.06, minNeighbors=2, minSize=(25, 25))
-
-        if len(faces) == 0:
-            prof_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_profileface.xml")
-            faces = prof_cascade.detectMultiScale(clahe_gray, scaleFactor=1.05, minNeighbors=2, minSize=(20, 20))
-
-        if len(faces) == 0:
-            eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_eye.xml")
-            eyes = eye_cascade.detectMultiScale(clahe_gray, scaleFactor=1.08, minNeighbors=2, minSize=(10, 10))
-            if len(eyes) >= 1:
-                ex, ey, ew, eh = eyes[0]
-                faces = np.array([[max(0, ex - ew), max(0, ey - eh), ew * 3, eh * 3]])
-
-        # If still no face, check edge variance & photo regions to support laminated/low-res Aadhaar/PAN cards
-        if len(faces) == 0:
-            edges = cv2.Canny(gray, 40, 120)
-            edge_density = float(np.mean(edges > 0))
-            h_img, w_img = img.shape[:2]
-            left_quad = gray[:, :int(w_img * 0.45)]
-            right_quad = gray[:, int(w_img * 0.55):]
-            left_std = float(np.std(left_quad)) if left_quad.size > 0 else 0
-            right_std = float(np.std(right_quad)) if right_quad.size > 0 else 0
-
-            if edge_density > 0.01 or left_std > 12.0 or right_std > 12.0:
-                if right_std > left_std:
-                    # Portrait is on right side of card
-                    faces = np.array([[int(w_img * 0.60), int(h_img * 0.15), int(w_img * 0.35), int(h_img * 0.65)]])
-                else:
-                    # Portrait is on left side of card
-                    faces = np.array([[int(w_img * 0.05), int(h_img * 0.15), int(w_img * 0.35), int(h_img * 0.65)]])
-
-        has_document_face = len(faces) > 0
+        # 2. Real Face Detection & Feature Extraction from Document with MTCNN Alignment
+        # First attempt: Direct MTCNN landmark alignment on full document image
+        emb, face_mode = _extractor.extract_from_bgr(img, return_mode=True)
+        has_document_face = face_mode == "mtcnn_aligned"
         doc_embedding: Optional[List[float]] = None
 
         if has_document_face:
-            # Pick largest detected face
-            faces_sorted = sorted(faces, key=lambda b: b[2] * b[3], reverse=True)
-            fx, fy, fw, fh = faces_sorted[0]
-            # Crop face with 15% padding
-            h_img, w_img = img.shape[:2]
-            y1 = max(0, fy - int(fh * 0.15))
-            y2 = min(h_img, fy + int(fh * 1.15))
-            x1 = max(0, fx - int(fw * 0.15))
-            x2 = min(w_img, fx + int(fw * 1.15))
-            face_crop = img[y1:y2, x1:x2]
-            if face_crop.size > 0:
-                emb = _extractor.extract_from_bgr(face_crop)
-                doc_embedding = emb.tolist()
-            else:
-                emb = _extractor.extract_from_bgr(img)
-                doc_embedding = emb.tolist()
+            doc_embedding = emb.tolist()
+        else:
+            # Fallback for laminated, low-contrast, or mock synthetic documents
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            clahe_gray = clahe.apply(gray)
+
+            face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+            faces = face_cascade.detectMultiScale(clahe_gray, scaleFactor=1.05, minNeighbors=2, minSize=(20, 20))
+            if len(faces) == 0:
+                faces = face_cascade.detectMultiScale(gray, scaleFactor=1.06, minNeighbors=2, minSize=(25, 25))
+
+            if len(faces) == 0:
+                prof_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_profileface.xml")
+                faces = prof_cascade.detectMultiScale(clahe_gray, scaleFactor=1.05, minNeighbors=2, minSize=(20, 20))
+
+            if len(faces) == 0:
+                eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_eye.xml")
+                eyes = eye_cascade.detectMultiScale(clahe_gray, scaleFactor=1.08, minNeighbors=2, minSize=(10, 10))
+                if len(eyes) >= 1:
+                    ex, ey, ew, eh = eyes[0]
+                    faces = np.array([[max(0, ex - ew), max(0, ey - eh), ew * 3, eh * 3]])
+
+            if len(faces) == 0:
+                edges = cv2.Canny(gray, 40, 120)
+                edge_density = float(np.mean(edges > 0))
+                h_img, w_img = img.shape[:2]
+                left_quad = gray[:, :int(w_img * 0.45)]
+                right_quad = gray[:, int(w_img * 0.55):]
+                left_std = float(np.std(left_quad)) if left_quad.size > 0 else 0
+                right_std = float(np.std(right_quad)) if right_quad.size > 0 else 0
+
+                if edge_density > 0.01 or left_std > 12.0 or right_std > 12.0:
+                    if right_std > left_std:
+                        faces = np.array([[int(w_img * 0.60), int(h_img * 0.15), int(w_img * 0.35), int(h_img * 0.65)]])
+                    else:
+                        faces = np.array([[int(w_img * 0.05), int(h_img * 0.15), int(w_img * 0.35), int(h_img * 0.65)]])
+
+            if len(faces) > 0:
+                faces_sorted = sorted(faces, key=lambda b: b[2] * b[3], reverse=True)
+                fx, fy, fw, fh = faces_sorted[0]
+                h_img, w_img = img.shape[:2]
+                y1 = max(0, fy - int(fh * 0.15))
+                y2 = min(h_img, fy + int(fh * 1.15))
+                x1 = max(0, fx - int(fw * 0.15))
+                x2 = min(w_img, fx + int(fw * 1.15))
+                face_crop = img[y1:y2, x1:x2]
+                if face_crop.size > 0:
+                    emb, face_mode = _extractor.extract_from_bgr(face_crop, return_mode=True)
+                    doc_embedding = emb.tolist()
+                    has_document_face = True
+
+        log.info("verification_service.doc_face_extracted", mode=face_mode, has_face=has_document_face)
 
         if not has_document_face:
             session.document_match = False
@@ -502,30 +503,21 @@ class VerificationService:
 
         deepfake_status = "NO_ANOMALY" if deepfake_score < 0.40 else "FLAGGED"
 
-        # 2. Real 1:1 Live Face Match against Document Photo
-        # Extract candidate frontal face crops across frames to find clearest view
+        # 2. Real 1:1 Live Face Match against Document Photo with MTCNN Alignment
+        # Extract candidate frontal face embeddings across video frames
         frames = bytes_to_frames(video_bytes, max_frames=16)
         candidate_embeddings = []
+        live_modes = []
 
         if frames and len(frames) > 0:
-            face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-
             for frame in frames:
                 img_uint8 = (frame * 255.0).astype(np.uint8) if frame.dtype != np.uint8 and frame.max() <= 1.0 else frame.astype(np.uint8)
-                gray = cv2.cvtColor(img_uint8, cv2.COLOR_RGB2GRAY)
-                faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=3, minSize=(35, 35))
-
-                for fx, fy, fw, fh in faces:
-                    if fw >= 30 and fh >= 30:
-                        h_f, w_f = img_uint8.shape[:2]
-                        y1 = max(0, fy - int(fh * 0.1))
-                        y2 = min(h_f, fy + int(fh * 1.1))
-                        x1 = max(0, fx - int(fw * 0.1))
-                        x2 = min(w_f, fx + int(fw * 1.1))
-                        face_crop = cv2.cvtColor(img_uint8[y1:y2, x1:x2], cv2.COLOR_RGB2BGR)
-                        if face_crop is not None and face_crop.size > 0:
-                            emb = _extractor.extract_from_bgr(face_crop)
-                            candidate_embeddings.append(emb)
+                bgr_frame = cv2.cvtColor(img_uint8, cv2.COLOR_RGB2BGR) if img_uint8.ndim == 3 and img_uint8.shape[2] == 3 else img_uint8
+                
+                emb, f_mode = _extractor.extract_from_bgr(bgr_frame, return_mode=True)
+                if emb is not None and not np.all(emb == 0):
+                    candidate_embeddings.append(emb)
+                    live_modes.append(f_mode)
 
         # Dynamic Cosine Similarity Computation
         doc_embedding_list = session.extracted_document_portrait_embedding
@@ -535,7 +527,7 @@ class VerificationService:
         # Read calibrated thresholds from YAML config
         id_cfg = get_identity_config()
         id_thresh = id_cfg.get("thresholds", {})
-        sim_pass = float(id_thresh.get("similarity_pass", 0.50))
+        sim_pass = float(id_thresh.get("similarity_pass", 0.55))
         sim_fail = float(id_thresh.get("similarity_fail", 0.35))
 
         live_cfg = get_liveness_config()

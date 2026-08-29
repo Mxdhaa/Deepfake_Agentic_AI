@@ -152,11 +152,11 @@ class LocalFilesystemBackend:
         session_dir = self.root / session_id
         session_dir.mkdir(parents=True, exist_ok=True)
 
-        # Write raw bytes atomically (temp → rename)
+        # Write raw bytes atomically (temp → replace)
         clip_path = self._clip_path(session_id)
         tmp_path = clip_path.with_suffix(".tmp")
         tmp_path.write_bytes(data)
-        tmp_path.rename(clip_path)
+        tmp_path.replace(clip_path)
 
         # Write metadata
         full_meta = {

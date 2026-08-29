@@ -262,8 +262,47 @@ def test_deepfake_above_borderline_band_hard_fails(tmp_env):
     res = run_verification_agent(session)
 
     assert res["has_hard_fail"] is True
+    assert res["is_borderline"] is False
     assert res["final_decision"] == "NOT_VERIFIED"
     assert res["retry_requested"] is False
+
+
+@pytest.mark.parametrize(
+    "score,expected_borderline,expected_hard_fail,expected_decision,expected_retry",
+    [
+        (0.34, False, False, "VERIFIED", False),       # Clean pass below lower threshold
+        (0.35, True, False, "UNDER_REVIEW", True),     # Lower exact boundary of borderline band
+        (0.40, True, False, "UNDER_REVIEW", True),     # Midpoint of borderline band
+        (0.45, True, False, "UNDER_REVIEW", True),     # Upper exact boundary of borderline band
+        (0.46, False, True, "NOT_VERIFIED", False),    # Just above borderline band -> hard fail
+        (0.60, False, True, "NOT_VERIFIED", False),    # Mid-high deepfake score -> hard fail
+        (0.74, False, True, "NOT_VERIFIED", False),    # High deepfake score -> hard fail
+        (0.75, False, True, "NOT_VERIFIED", False),    # Critical deepfake fail cutoff -> hard fail
+    ],
+)
+def test_deepfake_borderline_boundary_pinning_matrix(
+    tmp_env, score, expected_borderline, expected_hard_fail, expected_decision, expected_retry
+):
+    """
+    Regression gate: Pins exact numeric boundaries for deepfake evaluation:
+      - Clean pass: score < 0.35
+      - Symmetric borderline band: 0.35 <= score <= 0.45
+      - Hard fail: score > 0.45 (strictly NOT_VERIFIED, no retry)
+    """
+    session = _create_mock_session(
+        reference_id=f"CP-DF-PIN-{int(score*100)}",
+        face_sim=0.72,
+        deepfake_score=score,
+        challenge_match=True,
+        retry_count=0,
+    )
+
+    res = run_verification_agent(session)
+
+    assert res["is_borderline"] is expected_borderline, f"Failed is_borderline for score={score}"
+    assert res["has_hard_fail"] is expected_hard_fail, f"Failed has_hard_fail for score={score}"
+    assert res["final_decision"] == expected_decision, f"Failed final_decision for score={score}"
+    assert res["retry_requested"] is expected_retry, f"Failed retry_requested for score={score}"
 
 
 def test_borderline_attempt_2_escalates_to_hitl(tmp_env):
