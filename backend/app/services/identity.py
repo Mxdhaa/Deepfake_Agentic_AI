@@ -182,7 +182,8 @@ def compute_cosine_similarity(
 
 class FaceFeatureExtractor:
     """
-    Extracts normalized 512-d face feature embeddings using InceptionResnetV1 (VGGFace2).
+    Extracts normalized 512-d face feature embeddings using PyTorch / OpenCV.
+    No model trained from scratch.
     """
 
     def __init__(self) -> None:
@@ -193,10 +194,16 @@ class FaceFeatureExtractor:
         if self._initialized:
             return
         try:
-            from facenet_pytorch import InceptionResnetV1
-            # Pretrained face recognition backbone on VGGFace2 (512-d embeddings)
-            self._model = InceptionResnetV1(pretrained="vggface2").eval()
-            log.info("identity.feature_extractor_loaded", backbone="inception_resnet_v1_vggface2_512d")
+            import torchvision.models as models
+            import torch
+            import torch.nn as nn
+
+            # Use pretrained backbone as feature extractor (evaluation mode)
+            base = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
+            base.fc = nn.Identity()  # 512-d feature vector
+            base.eval()
+            self._model = base
+            log.info("identity.feature_extractor_loaded", backbone="resnet18_512d")
         except Exception as exc:
             log.warning("identity.feature_extractor_fallback", error=str(exc))
             self._model = None
@@ -227,10 +234,12 @@ class FaceFeatureExtractor:
             try:
                 import torch
                 rgb = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2RGB)
-                resized = cv2.resize(rgb, (160, 160), interpolation=cv2.INTER_LINEAR)
-                # Facenet fixed image standardization: (x - 127.5) / 128.0
-                tensor = torch.from_numpy(resized).permute(2, 0, 1).float()
-                tensor = (tensor - 127.5) / 128.0
+                resized = cv2.resize(rgb, (224, 224), interpolation=cv2.INTER_LINEAR)
+                # Standard ImageNet normalization
+                tensor = torch.from_numpy(resized).permute(2, 0, 1).float() / 255.0
+                mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+                std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+                tensor = (tensor - mean) / std
                 tensor = tensor.unsqueeze(0)
 
                 with torch.no_grad():
