@@ -469,15 +469,8 @@ def detect_sequential_motion(
 
         ordered_sub = _is_ordered_subsequence(canonical_expected, compact_peaks) or _is_ordered_subsequence(mirrored_expected, compact_peaks)
 
-        # Token presence: user performed the requested gestures during the 5s window
-        exp_unique = set(canonical_expected)
-        exp_mirrored_unique = set(mirrored_expected)
-        det_unique = set(compact_peaks)
-        overlap_direct = len(exp_unique.intersection(det_unique)) / len(exp_unique) if exp_unique else 1.0
-        overlap_mirror = len(exp_mirrored_unique.intersection(det_unique)) / len(exp_mirrored_unique) if exp_mirrored_unique else 1.0
-        token_match = max(overlap_direct, overlap_mirror) >= 0.50
-
-        challenge_passed = bool(has_general_motion and (exact_match or ordered_sub or token_match))
+        # Strict challenge evaluation: requires deliberate general motion and ordered execution
+        challenge_passed = bool(has_general_motion and (exact_match or ordered_sub))
     else:
         challenge_passed = bool(has_general_motion and len(compact_peaks) > 0)
 
