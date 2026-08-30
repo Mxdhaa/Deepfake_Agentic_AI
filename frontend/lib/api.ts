@@ -1,20 +1,19 @@
 /**
  * API client for the Deepfake Agentic AI backend.
- * Automatically routes through Next.js server-side rewrites (same-origin proxy)
- * in production to bypass browser CORS / Cloudflare Turnstile blocks.
+ * In browser production on Vercel, BASE_URL is strictly "" (relative same-origin)
+ * so all requests route through Next.js server-side rewrites, completely bypassing
+ * browser CORS and Cloudflare bot challenge blocks.
  */
 const getBaseUrl = (): string => {
-  if (process.env.NEXT_PUBLIC_API_URL) {
-    return process.env.NEXT_PUBLIC_API_URL.replace(/\/+$/, "");
-  }
   if (typeof window !== "undefined") {
+    // In local development on localhost / 127.0.0.1
     if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
-      return "http://localhost:8000";
+      return process.env.NEXT_PUBLIC_API_URL ? process.env.NEXT_PUBLIC_API_URL.replace(/\/+$/, "") : "http://localhost:8000";
     }
-    // On Vercel / production domain: use same-origin relative proxy via next.config.ts rewrites
+    // In browser production on Vercel: ALWAYS use relative path ""
     return "";
   }
-  return "";
+  return (process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || "https://deepfake-agentic-ai-backend.onrender.com").replace(/\/+$/, "");
 };
 
 export const BASE_URL = getBaseUrl();
@@ -111,11 +110,10 @@ export async function safeFetch(url: string, init?: RequestInit): Promise<Respon
     return await fetch(url, init);
   } catch (err: any) {
     if (err instanceof ApiError) throw err;
-    const isLocalhost = BASE_URL.includes("localhost") || BASE_URL.includes("127.0.0.1");
-    const hint = isLocalhost
-      ? `Ensure backend is running locally on ${BASE_URL} or configure NEXT_PUBLIC_API_URL in Vercel to your deployed Render URL.`
-      : `Cannot reach backend (${BASE_URL}). The Render service may still be building or waking up from sleep (~1-2 min).`;
-    throw new ApiError(0, hint);
+    const targetUrl = url.startsWith("http")
+      ? url
+      : `${typeof window !== "undefined" ? window.location.origin : ""}${url}`;
+    throw new ApiError(0, `Cannot reach backend proxy (${targetUrl}). Please verify the server is active and try again.`);
   }
 }
 
