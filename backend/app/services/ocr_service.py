@@ -18,22 +18,29 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from app.utils.logging import get_logger
 
+import threading
+
 log = get_logger(__name__)
 
 _READER = None
+_READER_LOCK = threading.Lock()
 
 
 def _get_ocr_reader():
     global _READER
-    if _READER is None:
+    if _READER is not None and _READER is not False:
+        return _READER
+    with _READER_LOCK:
+        if _READER is not None and _READER is not False:
+            return _READER
         try:
             import easyocr
             _READER = easyocr.Reader(["en"], gpu=False, verbose=False)
             log.info("ocr.easyocr_initialized")
+            return _READER
         except Exception as exc:
             log.warning("ocr.easyocr_unavailable", error=str(exc))
-            _READER = False
-    return _READER if _READER is not False else None
+            return None
 
 
 def _preprocess_image_variants(img_bgr: np.ndarray) -> List[np.ndarray]:

@@ -23,6 +23,11 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu && \
     pip install --no-cache-dir -r requirements.txt
 
+# Pre-download neural model weights (EasyOCR + FaceNet MTCNN & InceptionResnetV1)
+# Ensures zero network latency / cold-start download collisions during live requests
+RUN python -c "import easyocr; easyocr.Reader(['en'], gpu=False, download_enabled=True)" && \
+    python -c "import facenet_pytorch; facenet_pytorch.MTCNN(); facenet_pytorch.InceptionResnetV1(pretrained='vggface2').eval()"
+
 # Copy application source and configuration
 COPY . /app/
 

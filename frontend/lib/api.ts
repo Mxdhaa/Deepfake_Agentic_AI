@@ -476,7 +476,7 @@ export async function uploadVerificationDocument(
     throw new ApiError(
       500,
       err?.message === "Failed to fetch"
-        ? "Unable to reach verification backend. Please ensure the backend server is active on http://localhost:8000."
+        ? `Unable to reach verification backend at ${BASE_URL}. Please ensure the backend server is running and CORS is configured.`
         : (err?.message || "Document verification failed. Please try again.")
     );
   }
