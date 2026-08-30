@@ -402,23 +402,46 @@ class VerificationService:
                     else:
                         faces = np.array([[int(w_img * 0.05), int(h_img * 0.15), int(w_img * 0.35), int(h_img * 0.65)]])
 
-            # Final structural fallback: Aadhaar / laminated cards with compressed photos
-            # often have portraits too small or low-contrast for Haar detection.
-            # Use the top-right quadrant (standard Aadhaar portrait position) as fallback.
+            # Final structural fallback: try multiple known portrait regions on government IDs.
+            # Aadhaar: photo is on the LEFT side (standard layout: portrait left, info right)
+            # Some cards (PAN, Passport photo page): portrait centre or right
             if len(faces) == 0:
                 h_img, w_img = img.shape[:2]
                 log.warning("verification_service.doc_face_fallback_structural",
-                            img_shape=img.shape, note="No cascade detection — using structural portrait region.")
-                faces = np.array([[int(w_img * 0.65), int(h_img * 0.05), int(w_img * 0.30), int(h_img * 0.55)]])
+                            img_shape=img.shape, note="No cascade detection — trying all structural portrait regions.")
+                # Candidate regions: left-portrait (Aadhaar standard), right-portrait, centre
+                candidate_regions = [
+                    # Aadhaar standard: portrait occupies left ~30%, full height
+                    [0, int(h_img * 0.05), int(w_img * 0.32), int(h_img * 0.90)],
+                    # Newer Aadhaar / PAN: portrait right ~30%
+                    [int(w_img * 0.68), int(h_img * 0.05), int(w_img * 0.30), int(h_img * 0.90)],
+                    # Centre crop (passport photo page)
+                    [int(w_img * 0.30), int(h_img * 0.05), int(w_img * 0.40), int(h_img * 0.90)],
+                ]
+                # Pick the candidate region with highest local contrast (most likely to contain face)
+                best_region = None
+                best_std = -1.0
+                for rx, ry, rw, rh in candidate_regions:
+                    rx1, ry1 = max(0, rx), max(0, ry)
+                    rx2, ry2 = min(w_img, rx + rw), min(h_img, ry + rh)
+                    crop = gray[ry1:ry2, rx1:rx2]
+                    if crop.size == 0:
+                        continue
+                    std = float(np.std(crop))
+                    if std > best_std:
+                        best_std = std
+                        best_region = [rx, ry, rw, rh]
+                if best_region:
+                    faces = np.array([best_region])
 
             if len(faces) > 0:
                 faces_sorted = sorted(faces, key=lambda b: b[2] * b[3], reverse=True)
                 fx, fy, fw, fh = faces_sorted[0]
                 h_img, w_img = img.shape[:2]
-                y1 = max(0, fy - int(fh * 0.15))
-                y2 = min(h_img, fy + int(fh * 1.15))
-                x1 = max(0, fx - int(fw * 0.15))
-                x2 = min(w_img, fx + int(fw * 1.15))
+                y1 = max(0, fy - int(fh * 0.05))
+                y2 = min(h_img, fy + int(fh * 1.05))
+                x1 = max(0, fx - int(fw * 0.05))
+                x2 = min(w_img, fx + int(fw * 1.05))
                 face_crop = img[y1:y2, x1:x2]
                 if face_crop.size > 0:
                     emb, face_mode = _extractor.extract_from_bgr(face_crop, return_mode=True)
@@ -428,8 +451,8 @@ class VerificationService:
         log.info("verification_service.doc_face_extracted", mode=face_mode, has_face=has_document_face)
 
         # SECURITY GATE: A face embedding from the document is required for the 1:1 liveness comparison.
-        # The structural fallback above guarantees we always attempt extraction on a valid image.
-        # If has_document_face is still False after all attempts, the image is not a valid photo ID.
+        # After all cascade attempts + structural fallback, if still no face detected, hard-fail.
+        # Exception: if the image cannot be decoded at all (already caught above), we already returned.
         if not has_document_face:
             session.document_match = False
             session.decision_table.document = "NO_MATCH"
