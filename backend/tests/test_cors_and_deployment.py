@@ -159,6 +159,8 @@ class TestSignedVideoStreams:
         monkeypatch.setenv("STORAGE_LOCAL_ROOT", str(storage_dir))
         monkeypatch.setenv("REVIEWER_TOKEN", "super_secret_reviewer_token")
         monkeypatch.setenv("STREAM_SIGNING_KEY", "dedicated_stream_signing_key_492")
+        monkeypatch.setattr(settings, "REVIEWER_TOKEN", "super_secret_reviewer_token")
+        monkeypatch.setattr(settings, "STREAM_SIGNING_KEY", "dedicated_stream_signing_key_492")
 
         session_id = "test-session-stream-001"
         clip_data = b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom"

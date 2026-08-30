@@ -461,30 +461,34 @@ def detect_sequential_motion(
     has_general_motion = (motion_frame_count >= 2 or mean_mag >= min_flow_mag) and len(compact_peaks) > 0
 
     challenge_passed = False
+    exact_match = False
+    contiguous_match = False
+
     if canonical_expected:
-        m = len(canonical_expected)
-        n = len(compact_peaks)
+        def _is_contiguous_subsequence(sub: List[str], full: List[str]) -> bool:
+            if not sub:
+                return True
+            n, m = len(full), len(sub)
+            if m > n:
+                return False
+            for i in range(n - m + 1):
+                if full[i : i + m] == sub:
+                    return True
+            return False
 
-        # Mirror mapping (left <-> right ONLY for webcam mirror preview)
-        mirrored_expected = [{"left": "right", "right": "left"}.get(g, g) for g in canonical_expected]
+        exact_match = (compact_peaks == canonical_expected)
+        contiguous_match = _is_contiguous_subsequence(canonical_expected, compact_peaks)
 
-        exact_match = (compact_peaks == canonical_expected) or (compact_peaks == mirrored_expected)
-        
-        # Subsequence matching
-        def _is_ordered_subsequence(sub, full):
-            it = iter(full)
-            return all(item in it for item in sub)
-
-        ordered_sub = _is_ordered_subsequence(canonical_expected, compact_peaks) or _is_ordered_subsequence(mirrored_expected, compact_peaks)
-
-        # Strict challenge evaluation: requires deliberate general motion and ordered execution
-        challenge_passed = bool(has_general_motion and (exact_match or ordered_sub))
+        # Strict challenge evaluation: requires general motion and exact/contiguous sequence match
+        challenge_passed = bool(has_general_motion and (exact_match or contiguous_match))
     else:
         challenge_passed = bool(has_general_motion and len(compact_peaks) > 0)
 
     details = {
         "detected_sequence": compact_peaks,
         "expected_sequence": canonical_expected,
+        "exact_match": exact_match,
+        "contiguous_match": contiguous_match,
         "motion_frames": motion_frame_count,
         "mean_magnitude": round(mean_mag, 4),
         "dx_range": [round(float(np.min(dx_values)), 4), round(float(np.max(dx_values)), 4)] if dx_values else [0, 0],
@@ -501,7 +505,16 @@ def detect_sequential_motion(
         expected_sequence=canonical_expected,
         gesture_details=details,
     )
-    log.info("liveness.sequential_challenge_evaluated", **res)
+    log.info(
+        "liveness.sequential_challenge_evaluated",
+        challenge_passed=bool(challenge_passed),
+        expected_sequence=canonical_expected,
+        detected_sequence=compact_peaks,
+        exact_match=exact_match,
+        contiguous_match=contiguous_match,
+        mean_magnitude=round(float(mean_mag), 4),
+        motion_frames=int(motion_frame_count),
+    )
     return res
 
 

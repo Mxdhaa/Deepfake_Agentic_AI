@@ -68,9 +68,9 @@ def _capture_or_build_real_human_clip(sequence: list[str], frame_count: int = 24
             dx, dy = 0, 0
             offset = int((i + 1) * 6)
             if g in {"left", "turn_left"}:
-                dx = -offset
-            elif g in {"right", "turn_right"}:
                 dx = offset
+            elif g in {"right", "turn_right"}:
+                dx = -offset
             elif g in {"up", "look_up"}:
                 dy = -offset
             elif g in {"down", "look_down", "nod_head"}:
@@ -88,9 +88,9 @@ def _capture_or_build_real_human_clip(sequence: list[str], frame_count: int = 24
             dx, dy = 0, 0
             offset = int((4 - i - 1) * 6)
             if g in {"left", "turn_left"}:
-                dx = -offset
-            elif g in {"right", "turn_right"}:
                 dx = offset
+            elif g in {"right", "turn_right"}:
+                dx = -offset
             elif g in {"up", "look_up"}:
                 dy = -offset
             elif g in {"down", "look_down", "nod_head"}:
