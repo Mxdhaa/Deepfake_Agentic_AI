@@ -97,6 +97,45 @@ def bytes_to_frames(
     return frames
 
 
+def bytes_to_frames_contiguous(
+    video_bytes: bytes,
+    max_frames: int = 150,
+    resize: tuple[int, int] = (224, 224),
+) -> List[np.ndarray]:
+    """
+    Decode raw video bytes and return up to `max_frames` contiguous sequential RGB frames.
+    Avoids sparse temporal seeking so optical flow vectors between consecutive frames
+    are continuous and smooth.
+    """
+    import uuid as _uuid
+    tmp_path = str(_tmp_dir() / f"clip_contig_{_uuid.uuid4().hex}.mp4")
+    with open(tmp_path, "wb") as f:
+        f.write(video_bytes)
+
+    frames: List[np.ndarray] = []
+    try:
+        cap = cv2.VideoCapture(tmp_path)
+        if not cap.isOpened():
+            log.warning("video.contiguous_open_failed", path=tmp_path)
+            return frames
+
+        while len(frames) < max_frames:
+            ok, frame = cap.read()
+            if not ok or frame is None:
+                break
+            frames.append(_bgr_to_rgb_float(frame, resize))
+        cap.release()
+
+        log.debug("video.contiguous_extracted", n_frames=len(frames))
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+    return frames
+
+
 def estimate_fps(video_bytes: bytes) -> float:
     """
     Return the video's reported FPS. Falls back to 30.0 on failure.

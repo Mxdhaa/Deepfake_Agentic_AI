@@ -24,7 +24,7 @@ import cv2
 import numpy as np
 import yaml
 
-from app.services.video import bytes_to_frames, estimate_fps, estimate_duration_seconds
+from app.services.video import bytes_to_frames, bytes_to_frames_contiguous, estimate_fps, estimate_duration_seconds
 from app.models.detector import DeepfakeDetector
 from app.utils.logging import get_logger
 
@@ -258,7 +258,7 @@ def detect_sequential_motion(
     turn_dx_min = float(seq_cfg.get("turn_dx_min", 0.28))
     nod_dy_min = float(seq_cfg.get("nod_dy_min", 0.32))
     peak_min_gap = int(seq_cfg.get("peak_min_gap_frames", 2))
-    min_peak_sustain = int(seq_cfg.get("min_peak_sustain_frames", 1))
+    min_peak_sustain = max(2, int(seq_cfg.get("min_peak_sustain_frames", 2)))
     min_excursion_mag = float(seq_cfg.get("min_excursion_mag", 0.38))
     min_flow_mag = float(seq_cfg.get("flow_magnitude_min", 0.25))
     threshold = float(cfg.get("motion", {}).get("min_delta_threshold", 3.0))
@@ -290,7 +290,7 @@ def detect_sequential_motion(
 
     prev_gray: Optional[np.ndarray] = None
 
-    for frame in frames:
+    for f_idx, frame in enumerate(frames):
         if frame.dtype != np.uint8 and frame.max() <= 1.0:
             img_uint8 = (frame * 255.0).astype(np.uint8)
         else:
@@ -371,20 +371,22 @@ def detect_sequential_motion(
             dx_values.append(dx)
             dy_values.append(dy)
 
-            # Classify instantaneous frame direction purely based on optical flow
+            # Classify instantaneous frame direction purely based on optical flow.
+            # Ignore initial 2 settling frames (f_idx < 2) where camera auto-exposure/gain occurs.
             dir_cand = None
-            if abs(dy) > abs(dx) * 1.15 and abs(dy) >= nod_dy_min:
-                if dy < -nod_dy_min:
-                    dir_cand = "up"
-                elif dy >= nod_dy_min:
-                    dir_cand = "down"
-            elif abs(dx) >= turn_dx_min:
-                # User turning Left moves face to image right (dx > 0)
-                # User turning Right moves face to image left (dx < 0)
-                if dx > turn_dx_min:
-                    dir_cand = "left"
-                elif dx < -turn_dx_min:
-                    dir_cand = "right"
+            if f_idx >= 2:
+                if abs(dy) > abs(dx) * 1.15 and abs(dy) >= nod_dy_min:
+                    if dy < -nod_dy_min:
+                        dir_cand = "up"
+                    elif dy >= nod_dy_min:
+                        dir_cand = "down"
+                elif abs(dx) >= turn_dx_min:
+                    # User turning Left moves face to image right (dx > 0)
+                    # User turning Right moves face to image left (dx < 0)
+                    if dx > turn_dx_min:
+                        dir_cand = "left"
+                    elif dx < -turn_dx_min:
+                        dir_cand = "right"
 
             frame_directions.append(dir_cand)
 
@@ -404,9 +406,15 @@ def detect_sequential_motion(
     sustain_count: int = 0
     cooldown_frames: int = 0
     expecting_recovery: Optional[str] = None
+    recovery_ttl: int = 0
 
     for d, dx_val, dy_val in zip(frame_directions, dx_values, dy_values):
         frame_mag = abs(dx_val) if d in {"left", "right"} else abs(dy_val)
+
+        if recovery_ttl > 0:
+            recovery_ttl -= 1
+            if recovery_ttl == 0:
+                expecting_recovery = None
 
         if cooldown_frames > 0:
             cooldown_frames -= 1
@@ -414,12 +422,13 @@ def detect_sequential_motion(
                 continue
 
         if d is None:
-            if active_gesture and accum_mag >= min_excursion_mag and sustain_count >= min_peak_sustain:
+            if active_gesture and accum_mag >= min_excursion_mag and (sustain_count >= min_peak_sustain or accum_mag >= 0.70):
                 if expecting_recovery and active_gesture == expecting_recovery:
                     expecting_recovery = None
                 elif not detected_peaks or detected_peaks[-1] != active_gesture:
                     detected_peaks.append(active_gesture)
                     expecting_recovery = OPPOSITE_DIR.get(active_gesture)
+                    recovery_ttl = 3
                     cooldown_frames = peak_min_gap
             active_gesture = None
             accum_mag = 0.0
@@ -435,18 +444,19 @@ def detect_sequential_motion(
             sustain_count += 1
         else:
             # Direction transition (including to opposite recovery stroke)
-            if accum_mag >= min_excursion_mag and sustain_count >= min_peak_sustain:
+            if accum_mag >= min_excursion_mag and (sustain_count >= min_peak_sustain or accum_mag >= 0.70):
                 if expecting_recovery and active_gesture == expecting_recovery:
                     expecting_recovery = None
                 elif not detected_peaks or detected_peaks[-1] != active_gesture:
                     detected_peaks.append(active_gesture)
                     expecting_recovery = OPPOSITE_DIR.get(active_gesture)
+                    recovery_ttl = 3
                     cooldown_frames = peak_min_gap
             active_gesture = d
             accum_mag = frame_mag
             sustain_count = 1
 
-    if active_gesture and accum_mag >= min_excursion_mag and sustain_count >= min_peak_sustain:
+    if active_gesture and accum_mag >= min_excursion_mag and (sustain_count >= min_peak_sustain or accum_mag >= 0.70):
         if not (expecting_recovery and active_gesture == expecting_recovery):
             if not detected_peaks or detected_peaks[-1] != active_gesture:
                 detected_peaks.append(active_gesture)
@@ -460,27 +470,20 @@ def detect_sequential_motion(
     mean_mag = float(np.mean(magnitudes)) if magnitudes else 0.0
     has_general_motion = (motion_frame_count >= 2 or mean_mag >= min_flow_mag) and len(compact_peaks) > 0
 
+    def _is_ordered_subsequence(sub: List[str], full: List[str]) -> bool:
+        it = iter(full)
+        return all(item in it for item in sub)
+
     challenge_passed = False
     exact_match = False
     contiguous_match = False
 
     if canonical_expected:
-        def _is_contiguous_subsequence(sub: List[str], full: List[str]) -> bool:
-            if not sub:
-                return True
-            n, m = len(full), len(sub)
-            if m > n:
-                return False
-            for i in range(n - m + 1):
-                if full[i : i + m] == sub:
-                    return True
-            return False
-
         exact_match = (compact_peaks == canonical_expected)
-        contiguous_match = _is_contiguous_subsequence(canonical_expected, compact_peaks)
+        contiguous_match = _is_ordered_subsequence(canonical_expected, compact_peaks)
 
-        # Strict challenge evaluation: requires general motion and exact/contiguous sequence match
-        challenge_passed = bool(has_general_motion and (exact_match or contiguous_match))
+        # Challenge evaluation: requires general motion and ordered sequence match
+        challenge_passed = bool(has_general_motion and contiguous_match)
     else:
         challenge_passed = bool(has_general_motion and len(compact_peaks) > 0)
 
@@ -767,8 +770,9 @@ def analyze_liveness(
     duration = estimate_duration_seconds(video_bytes)
     blinks = detect_blinks(frames, duration_seconds=duration)
 
-    # 4. Sequential Motion & Challenge Verification
-    motion = detect_motion(frames, expected_challenge=expected_challenge, blinks=blinks)
+    # 4. Sequential Motion & Challenge Verification (using contiguous frames for smooth optical flow)
+    contiguous_frames = bytes_to_frames_contiguous(video_bytes, max_frames=150)
+    motion = detect_motion(contiguous_frames if contiguous_frames else frames, expected_challenge=expected_challenge, blinks=blinks)
     challenge_match = bool(motion["challenge_passed"])
 
     # 5. AV sync

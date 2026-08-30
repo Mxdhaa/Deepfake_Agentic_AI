@@ -44,9 +44,9 @@ def _build_natural_motion_clip(sequence: list[str]) -> bytes:
             dx, dy = 0, 0
             offset = int((i + 1) * 6)
             if g in {"left", "turn_left"}:
-                dx = -offset
-            elif g in {"right", "turn_right"}:
                 dx = offset
+            elif g in {"right", "turn_right"}:
+                dx = -offset
             elif g in {"up", "look_up"}:
                 dy = -offset
             elif g in {"down", "look_down", "nod_head"}:
@@ -60,9 +60,9 @@ def _build_natural_motion_clip(sequence: list[str]) -> bytes:
             dx, dy = 0, 0
             offset = int((4 - i - 1) * 6)
             if g in {"left", "turn_left"}:
-                dx = -offset
-            elif g in {"right", "turn_right"}:
                 dx = offset
+            elif g in {"right", "turn_right"}:
+                dx = -offset
             elif g in {"up", "look_up"}:
                 dy = -offset
             elif g in {"down", "look_down", "nod_head"}:

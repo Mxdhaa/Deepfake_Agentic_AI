@@ -517,6 +517,20 @@ class VerificationService:
         # Server-enforced sequential challenge takes precedence over client parameter
         expected_challenge = session.challenge_sequence or challenge_type or "sequential_motion"
 
+        # Archive raw video clip to storage for audit & forensic analysis
+        try:
+            get_storage().write(
+                f"{reference_id}_liveness",
+                video_bytes,
+                metadata={
+                    "reference_id": reference_id,
+                    "challenge": expected_challenge,
+                    "retry_count": getattr(session, "retry_count", 0),
+                },
+            )
+        except Exception as st_exc:
+            log.warning("verification_service.liveness_storage_failed", error=str(st_exc))
+
         # 1. Run full dynamic sequential liveness & optical flow peak analysis pipeline
         liveness_res = analyze_liveness(video_bytes, expected_challenge=expected_challenge)
 

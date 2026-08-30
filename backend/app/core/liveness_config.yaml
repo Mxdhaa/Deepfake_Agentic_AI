@@ -60,7 +60,7 @@ sequential_motion:
   turn_dx_min:              0.28
   nod_dy_min:               0.32
   peak_min_gap_frames:      2
-  min_peak_sustain_frames:  1
+  min_peak_sustain_frames:  2
   min_excursion_mag:        0.38
   flow_magnitude_min:       0.25
 
