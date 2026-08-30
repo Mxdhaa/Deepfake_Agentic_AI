@@ -477,6 +477,52 @@ export async function verifyVerificationOtp(referenceId: string, otp: string): P
 }
 
 /**
+ * Fast client-side image compression (HTML5 Canvas) to guarantee sub-second uploads
+ * and avoid Vercel / serverless payload size limits (4.5MB limit).
+ */
+async function compressImageForUpload(file: File | Blob, maxDim = 1200, quality = 0.85): Promise<Blob> {
+  if (typeof window === "undefined" || !(file instanceof Blob)) {
+    return file;
+  }
+  if (!file.type || !file.type.startsWith("image/")) {
+    return file;
+  }
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let { width, height } = img;
+      if (width > maxDim || height > maxDim) {
+        if (width > height) {
+          height = Math.round((height * maxDim) / width);
+          width = maxDim;
+        } else {
+          width = Math.round((width * maxDim) / height);
+          height = maxDim;
+        }
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        resolve(file);
+        return;
+      }
+      ctx.drawImage(img, 0, 0, width, height);
+      canvas.toBlob(
+        (blob) => resolve(blob || file),
+        "image/jpeg",
+        quality
+      );
+    };
+    img.onerror = () => resolve(file);
+    img.src = url;
+  });
+}
+
+/**
  * 6. Upload ID Document with OCR Cross-Check
  */
 export async function uploadVerificationDocument(
@@ -489,9 +535,10 @@ export async function uploadVerificationDocument(
   fieldChecks: { name: string; dob: string; ckyc: string };
   message: string;
 }> {
+  const compressed = await compressImageForUpload(documentFile);
   const form = new FormData();
-  const filename = (documentFile instanceof File && documentFile.name) ? documentFile.name : "id_document.jpg";
-  form.append("document", documentFile, filename);
+  const filename = (documentFile instanceof File && documentFile.name) ? documentFile.name.replace(/\.[^/.]+$/, ".jpg") : "id_document.jpg";
+  form.append("document", compressed, filename);
   const res = await safeFetch(`${BASE_URL}/api/v1/verification/${referenceId}/document`, {
     method: "POST",
     body: form,
