@@ -474,16 +474,33 @@ def detect_sequential_motion(
         it = iter(full)
         return all(item in it for item in sub)
 
-    def _is_prefix_match(sub: List[str], full: List[str]) -> bool:
-        return full[: len(sub)] == sub
-
-    def _is_ordered_challenge_match(expected: List[str], detected: List[str]) -> bool:
+    def _validate_physical_challenge_sequence(expected: List[str], detected: List[str]) -> bool:
         if not expected or not detected:
             return False
         if detected[0] != expected[0]:
             return False
-        it = iter(detected)
-        return all(item in it for item in expected)
+
+        cleaned = []
+        current_expected_idx = 0
+        unreturned = set()
+
+        for p in detected:
+            target = expected[current_expected_idx] if current_expected_idx < len(expected) else None
+            if target and p == target:
+                cleaned.append(p)
+                current_expected_idx += 1
+                if p in OPPOSITE_DIR:
+                    unreturned.add(OPPOSITE_DIR[p])
+                if current_expected_idx == len(expected):
+                    break
+            elif p in unreturned:
+                unreturned.remove(p)
+                continue
+            else:
+                # Unassigned extra gesture or wrong motion -> reject
+                return False
+
+        return current_expected_idx == len(expected)
 
     challenge_passed = False
     exact_match = False
@@ -493,10 +510,10 @@ def detect_sequential_motion(
     if canonical_expected:
         exact_match = (compact_peaks == canonical_expected)
         contiguous_match = _is_ordered_subsequence(canonical_expected, compact_peaks)
-        prefix_match = _is_prefix_match(canonical_expected, compact_peaks)
+        prefix_match = _validate_physical_challenge_sequence(canonical_expected, compact_peaks)
 
-        # Challenge evaluation: requires general motion, correct initial gesture, and ordered sequence match
-        challenge_passed = bool(has_general_motion and _is_ordered_challenge_match(canonical_expected, compact_peaks))
+        # Strict physical challenge evaluation: Gesture 1 must be first, only rebound strokes allowed
+        challenge_passed = bool(has_general_motion and prefix_match)
     else:
         challenge_passed = bool(has_general_motion and len(compact_peaks) > 0)
 
