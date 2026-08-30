@@ -189,7 +189,7 @@ docker run -d -p 8000:8000 deepfake-backend
 | Signal Category | Signal Name | Pass Condition |
 | :--- | :--- | :--- |
 | **Identity & OCR** | Identity Record | Exact CKYC Database Match |
-| **Identity & OCR** | Legal Name & DOB | Match Score $\ge 70\%$ |
+| **Identity & OCR** | Legal Name & DOB | Exact Verification Match |
 | **Security** | Phone OTP | Cryptographically Verified |
 | **Document** | Authenticity & Face | Valid ID Crop Extracted |
 | **Biometrics** | Live Face Match | Cosine Similarity $\ge 0.55$ |
