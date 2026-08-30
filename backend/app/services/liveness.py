@@ -428,7 +428,7 @@ def detect_sequential_motion(
                 elif not detected_peaks or detected_peaks[-1] != active_gesture:
                     detected_peaks.append(active_gesture)
                     expecting_recovery = OPPOSITE_DIR.get(active_gesture)
-                    recovery_ttl = 3
+                    recovery_ttl = 12
                     cooldown_frames = peak_min_gap
             active_gesture = None
             accum_mag = 0.0
@@ -450,7 +450,7 @@ def detect_sequential_motion(
                 elif not detected_peaks or detected_peaks[-1] != active_gesture:
                     detected_peaks.append(active_gesture)
                     expecting_recovery = OPPOSITE_DIR.get(active_gesture)
-                    recovery_ttl = 3
+                    recovery_ttl = 12
                     cooldown_frames = peak_min_gap
             active_gesture = d
             accum_mag = frame_mag
@@ -477,6 +477,20 @@ def detect_sequential_motion(
     def _is_prefix_match(sub: List[str], full: List[str]) -> bool:
         return full[: len(sub)] == sub
 
+    def _strip_unreturned_rebounds(peaks: List[str]) -> List[str]:
+        cleaned: List[str] = []
+        unreturned = set()
+        for p in peaks:
+            if p in unreturned:
+                unreturned.remove(p)
+                continue
+            cleaned.append(p)
+            if p in OPPOSITE_DIR:
+                unreturned.add(OPPOSITE_DIR[p])
+        return cleaned
+
+    cleaned_peaks = _strip_unreturned_rebounds(compact_peaks)
+
     challenge_passed = False
     exact_match = False
     contiguous_match = False
@@ -485,9 +499,9 @@ def detect_sequential_motion(
     if canonical_expected:
         exact_match = (compact_peaks == canonical_expected)
         contiguous_match = _is_ordered_subsequence(canonical_expected, compact_peaks)
-        prefix_match = _is_prefix_match(canonical_expected, compact_peaks)
+        prefix_match = _is_prefix_match(canonical_expected, cleaned_peaks)
 
-        # Challenge evaluation: requires general motion and prefix match
+        # Challenge evaluation: requires general motion and prefix match on rebound-stripped sequence
         challenge_passed = bool(has_general_motion and prefix_match)
     else:
         challenge_passed = bool(has_general_motion and len(compact_peaks) > 0)
