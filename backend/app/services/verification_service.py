@@ -402,6 +402,15 @@ class VerificationService:
                     else:
                         faces = np.array([[int(w_img * 0.05), int(h_img * 0.15), int(w_img * 0.35), int(h_img * 0.65)]])
 
+            # Final structural fallback: Aadhaar / laminated cards with compressed photos
+            # often have portraits too small or low-contrast for Haar detection.
+            # Use the top-right quadrant (standard Aadhaar portrait position) as fallback.
+            if len(faces) == 0:
+                h_img, w_img = img.shape[:2]
+                log.warning("verification_service.doc_face_fallback_structural",
+                            img_shape=img.shape, note="No cascade detection — using structural portrait region.")
+                faces = np.array([[int(w_img * 0.65), int(h_img * 0.05), int(w_img * 0.30), int(h_img * 0.55)]])
+
             if len(faces) > 0:
                 faces_sorted = sorted(faces, key=lambda b: b[2] * b[3], reverse=True)
                 fx, fy, fw, fh = faces_sorted[0]
@@ -418,18 +427,14 @@ class VerificationService:
 
         log.info("verification_service.doc_face_extracted", mode=face_mode, has_face=has_document_face)
 
+        # NOTE: We do NOT hard-block on face detection failure here.
+        # The authoritative document validation is OCR name+DOB matching against the registry.
+        # The face embedding (if extracted) is used for 1:1 matching in the liveness step.
+        # Aadhaar cards with tiny/laminated portrait photos may not yield a face crop — that is fine.
         if not has_document_face:
-            session.document_match = False
-            session.decision_table.document = "NO_MATCH"
-            session.decision_table.document_face = "NO_MATCH"
-            session.updated_at = datetime.now(timezone.utc).isoformat()
-            self._save_sessions()
-            return (
-                False,
-                {},
-                {"portrait_photo": "mismatch", "document_structure": "match", "name": "mismatch", "dob": "mismatch"},
-                "No portrait photo detected on the uploaded ID card. Please ensure a clear photo ID is visible.",
-            )
+            log.warning("verification_service.doc_no_face_embedding",
+                        note="No face crop extracted from document — proceeding to OCR validation.")
+            session.decision_table.document_face = "UNDETECTED"
 
         # 3. Dynamic OCR Text Extraction & Cross-Check against Registry
         ocr_matched, extracted_data, field_checks, ocr_error = parse_and_validate_id_document(
