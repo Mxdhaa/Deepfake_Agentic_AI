@@ -474,16 +474,21 @@ def detect_sequential_motion(
         it = iter(full)
         return all(item in it for item in sub)
 
+    def _is_prefix_match(sub: List[str], full: List[str]) -> bool:
+        return full[: len(sub)] == sub
+
     challenge_passed = False
     exact_match = False
     contiguous_match = False
+    prefix_match = False
 
     if canonical_expected:
         exact_match = (compact_peaks == canonical_expected)
         contiguous_match = _is_ordered_subsequence(canonical_expected, compact_peaks)
+        prefix_match = _is_prefix_match(canonical_expected, compact_peaks)
 
-        # Challenge evaluation: requires general motion and ordered sequence match
-        challenge_passed = bool(has_general_motion and contiguous_match)
+        # Challenge evaluation: requires general motion and prefix match
+        challenge_passed = bool(has_general_motion and prefix_match)
     else:
         challenge_passed = bool(has_general_motion and len(compact_peaks) > 0)
 
@@ -492,6 +497,7 @@ def detect_sequential_motion(
         "expected_sequence": canonical_expected,
         "exact_match": exact_match,
         "contiguous_match": contiguous_match,
+        "prefix_match": prefix_match,
         "motion_frames": motion_frame_count,
         "mean_magnitude": round(mean_mag, 4),
         "dx_range": [round(float(np.min(dx_values)), 4), round(float(np.max(dx_values)), 4)] if dx_values else [0, 0],
