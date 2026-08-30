@@ -20,38 +20,18 @@ Modern Identity Verification (KYC) systems are increasingly vulnerable to AI-gen
 
 ## 🏛️ System Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────────────┐
-│                                   NEXT.JS FRONTEND (Port 3000)                          │
-│   Step 1: User Info & OTP  │  Step 2: ID Document Upload  │  Step 3: Liveness & Video  │
-└───────────────────────────────────────────┬─────────────────────────────────────────────┘
-                                            │ REST API (JSON / Multipart)
-                                            ▼
-┌─────────────────────────────────────────────────────────────────────────────────────────┐
-│                                FASTAPI BACKEND SERVER (Port 8000)                       │
-│                                                                                         │
-│  ┌───────────────────────┐   ┌───────────────────────────┐   ┌───────────────────────┐  │
-│  │ 1. EasyOCR Service    │   │ 2. Biometric Matcher      │   │ 3. Deepfake Detector  │  │
-│  │    Document Text      │   │    MTCNN Aligned Face     │   │    PyTorch Neural     │  │
-│  │    Extraction & OCR   │   │    Inception-ResNet Similarity│   │    Artifact Scoring   │  │
-│  └───────────────────────┘   └───────────────────────────┘   └───────────────────────┘  │
-│                                                                                         │
-│  ┌───────────────────────────────────────────────────────────────────────────────────┐  │
-│  │ 4. Optical Flow Sequential Liveness Engine                                        │  │
-│  │    - Contiguous 30fps Video Decoding (bytes_to_frames_contiguous)                │  │
-│  │    - OpenCV Farneback Optical Flow Vector Estimation & Face ROI Tracking          │  │
-│  │    - 2-Stage Excursion Accumulator (accum_mag >= 0.38, sustain_count >= 2)         │  │
-│  │    - Strict Physical Rebound Sequence Validator (_validate_physical_challenge)   │  │
-│  └───────────────────────────────────────────────────────────────────────────────────┘  │
-│                                                                                         │
-│  ┌───────────────────────────────────────────────────────────────────────────────────┐  │
-│  │ 5. LangGraph Multi-Agent Orchestration & Tamper-Evident Audit Ledger              │  │
-│  │    - Deterministic Signal Collection (10 Biometric/OCR/Liveness Signals)          │  │
-│  │    - Automated Retry Routing for Borderline Signals                               │  │
-│  │    - SHA-256 Hash-Chained Audit Seal (app.services.audit)                         │  │
-│  └───────────────────────────────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────────────────────────┘
-```
+![System Architecture Diagram](docs/assets/system_architecture.jpg)
+
+### 6-Layer Functional Architecture Breakdown
+
+| Layer | Component | Core Functionality |
+| :--- | :--- | :--- |
+| **Layer 1** | **Multi-Modal Ingestion & Preprocessing** | Contiguous 30fps video frame extraction, OpenCV landmark alignment, 2-stage motion accumulation (`turn_dx_min = 0.28`, `nod_dy_min = 0.32`), FFT frequency domain residuals, and EasyOCR document parsing. |
+| **Layer 2** | **Orchestration & Memory** | LangGraph autonomous task dispatcher, workflow router, context retention, and vector state memory. |
+| **Layer 3** | **Core AI System** | Document bounding box detection, ID face crop extraction, and multi-field OCR data parsing (Name, DOB, ID Number). |
+| **Layer 4** | **Specialized Evaluation Agents & Fusion Engine** | **Physical Rebound Active Liveness Agent** (`_validate_physical_challenge_sequence`), **Perception & Biometric Matcher** (MTCNN Cosine Similarity $\ge 0.55$), **Visual Artifact & Temporal Agents**, and the **Unified 10-Signal Consensus Decision Matrix**. |
+| **Layer 5** | **Cryptographic Audit & HITL Escalation** | **SHA-256 Hash-Chained Audit Ledger** (`prev_hash` $\rightarrow$ `record_hash`), **Ephemeral HMAC-SHA256 Signed Stream Engine**, and **Human-in-the-Loop Reviewer Portal**. |
+| **Layer 6** | **Output Dashboards** | Real-time Analyst Verification Console, Spatial Heatmap Viewer, and System Health Performance Dashboards. |
 
 ---
 

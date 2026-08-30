@@ -100,6 +100,9 @@ def get_audit_chain_path() -> Path:
     env_path = os.getenv("AUDIT_CHAIN_PATH") or os.getenv("AUDIT_LOG_PATH")
     if env_path:
         return Path(env_path)
+    backend_storage = Path("backend/data/storage/audit_chain.jsonl").resolve()
+    if backend_storage.exists() and backend_storage.stat().st_size > 0:
+        return backend_storage
     storage_root = Path(os.getenv("STORAGE_LOCAL_ROOT", "data/storage")).resolve()
     return storage_root / "audit_chain.jsonl"
 
@@ -146,9 +149,7 @@ def seal_record(
     with _chain_lock:
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        if _tail_state is None:
-            _tail_state = _read_tail_from_disk(path)
-
+        _tail_state = _read_tail_from_disk(path)
         last_index, prev_hash = _tail_state
         next_index = last_index + 1
 

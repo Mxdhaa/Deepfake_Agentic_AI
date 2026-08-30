@@ -116,13 +116,17 @@ def _map_verification_session_to_case(session: Any) -> Dict[str, Any]:
         mapped_status = "resolved_approved"
         decision = "pass"
         recommendation = "APPROVE"
-    elif session.status == "NOT_VERIFIED":
+    elif session.status in {"NOT_VERIFIED", "FAILED", "REJECTED"}:
         mapped_status = "resolved_rejected"
         decision = "fail"
         recommendation = "REJECT"
-    else:  # UNDER_REVIEW, IN_PROGRESS
+    elif session.status == "UNDER_REVIEW":
         mapped_status = "pending_review"
         decision = "borderline"
+        recommendation = "REFER_TO_HUMAN"
+    else:  # IN_PROGRESS (Abandoned onboarding session prior to video submission)
+        mapped_status = "abandoned"
+        decision = "abandoned"
         recommendation = "REFER_TO_HUMAN"
 
     resolved_at = session.updated_at if mapped_status != "pending_review" else None
@@ -190,10 +194,10 @@ def list_pending_cases(
                     try:
                         entry = json.loads(line)
                         cid = entry.get("case_id") or entry.get("session_id")
-                        if cid:
-                            seen_ids.add(cid)
                         if status is None or status.lower() in {"all", "*"} or entry.get("status") == status:
                             cases.append(entry)
+                            if cid:
+                                seen_ids.add(cid)
                     except Exception:
                         pass
 
