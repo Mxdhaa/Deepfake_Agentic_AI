@@ -79,64 +79,21 @@ class KycRegistryService:
             self._load_records()
 
     def _seed_default_records(self) -> None:
-        """Seed 100 realistic Indian CKYC records."""
+        """Seed Medha Kumar CKYC records."""
         records: Dict[str, CkycRecord] = {}
         now_iso = datetime.now(timezone.utc).isoformat()
 
-        # Deterministic primary test records
         primary_records = [
-            ("CKYC-20050214", "Medha Kumar", "2005-02-14", "+91 9876501402", "NOT_STARTED"),
-            ("CKYC-10001", "Aarav Sharma", "1994-05-14", "+91 9876543210", "NOT_STARTED"),
-            ("CKYC-10002", "Priya Patel", "1997-08-22", "+91 9812345678", "NOT_STARTED"),
-            ("CKYC-10003", "Vikram Malhotra", "1991-11-03", "+91 9765432109", "VERIFIED"),
-            ("CKYC-10004", "Ananya Verma", "1999-02-18", "+91 9654321098", "UNDER_REVIEW"),
-            ("CKYC-10005", "Rohan Reddy", "1993-09-30", "+91 9543210987", "NOT_STARTED"),
-            ("CKYC-10006", "Sneha Nair", "1996-12-05", "+91 9432109876", "VERIFIED"),
-            ("CKYC-78901234", "Kavya Iyer", "1995-07-19", "+91 9321098765", "NOT_STARTED"),
+            ("CKYC-20050214", "Medha Kumar", "2005-02-14", "+91 9876501402", "VERIFIED"),
+            ("CKYC-796497054339", "Medha Kumar", "2005-02-14", "+91 9876501402", "VERIFIED"),
         ]
 
         for ckyc, name, dob, phone, status in primary_records:
-            face_ref = None
-            if status == "VERIFIED":
-                face_ref = {
-                    "face_reference": f"ref-face-{ckyc.lower()}",
-                    "verified_at": now_iso,
-                    "embedding_dimension": 512,
-                }
-            records[ckyc] = CkycRecord(
-                ckyc_number=ckyc,
-                legal_name=name,
-                date_of_birth=dob,
-                registered_phone=phone,
-                registered_face_reference=face_ref,
-                verification_status=status,
-                created_at=now_iso,
-                updated_at=now_iso,
-            )
-
-        # Generate remaining up to 100 records
-        rnd = random.Random(42)  # Deterministic seed for reproducible registry
-        for i in range(10007, 10101):
-            ckyc = f"CKYC-{i}"
-            name = f"{rnd.choice(_INDIAN_FIRST_NAMES)} {rnd.choice(_INDIAN_LAST_NAMES)}"
-            year = rnd.randint(1975, 2004)
-            month = f"{rnd.randint(1, 12):02d}"
-            day = f"{rnd.randint(1, 28):02d}"
-            dob = f"{year}-{month}-{day}"
-            phone = f"+91 {rnd.randint(9000000000, 9999999999)}"
-            
-            # ~20% VERIFIED, ~10% UNDER_REVIEW, ~70% NOT_STARTED
-            roll = rnd.random()
-            if roll < 0.20:
-                status = "VERIFIED"
-                face_ref = {"face_reference": f"ref-face-{ckyc.lower()}", "verified_at": now_iso, "embedding_dimension": 512}
-            elif roll < 0.30:
-                status = "UNDER_REVIEW"
-                face_ref = None
-            else:
-                status = "NOT_STARTED"
-                face_ref = None
-
+            face_ref = {
+                "face_reference": f"ref-face-{ckyc.lower()}",
+                "verified_at": now_iso,
+                "embedding_dimension": 512,
+            }
             records[ckyc] = CkycRecord(
                 ckyc_number=ckyc,
                 legal_name=name,

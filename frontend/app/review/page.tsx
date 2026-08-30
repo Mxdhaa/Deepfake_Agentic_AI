@@ -17,10 +17,10 @@ import {
 export default function ReviewPage() {
   // Authentication state (persisted strictly in browser sessionStorage)
   const [token, setToken] = useState<string>("");
-  const [reviewerName, setReviewerName] = useState<string>("Auditor Priya");
+  const [reviewerName, setReviewerName] = useState<string>("Auditor Reviewer");
   const [isAuthReady, setIsAuthReady] = useState<boolean>(false);
   const [loginInputToken, setLoginInputToken] = useState<string>("");
-  const [loginInputName, setLoginInputName] = useState<string>("Auditor Priya");
+  const [loginInputName, setLoginInputName] = useState<string>("Auditor Reviewer");
   const [authError, setAuthError] = useState<string | null>(null);
   const [connectionError, setConnectionError] = useState<string | null>(null);
 
