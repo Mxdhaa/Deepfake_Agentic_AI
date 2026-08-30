@@ -241,6 +241,18 @@ async def submit_session_decision(
 
 # ─── Media Review Endpoints ───────────────────────────────────────────────────
 
+def _resolve_storage_key(session_id: str, storage) -> str:
+    if storage.exists(session_id):
+        return session_id
+    liveness_key = f"{session_id}_liveness"
+    if storage.exists(liveness_key):
+        return liveness_key
+    doc_key = f"{session_id}_document"
+    if storage.exists(doc_key):
+        return doc_key
+    return session_id
+
+
 @router.get(
     "/{session_id}/clip",
     response_model=ClipAccessResponse,
@@ -255,7 +267,9 @@ async def get_clip_url(
     ip = request.client.host if request.client else "unknown"
 
     storage = get_storage()
-    if not storage.exists(session_id):
+    target_key = _resolve_storage_key(session_id, storage)
+
+    if not storage.exists(target_key):
         log_access_event(
             session_id=session_id,
             reviewer_id=reviewer_id,
@@ -263,7 +277,7 @@ async def get_clip_url(
             outcome="denied",
             ip=ip,
         )
-        raise HTTPException(status_code=404, detail=f"Session {session_id!r} not found.")
+        raise HTTPException(status_code=404, detail=f"Session clip {session_id!r} not found.")
 
     log_access_event(
         session_id=session_id,
@@ -273,11 +287,11 @@ async def get_clip_url(
         ip=ip,
     )
 
-    url = storage.presign(session_id, expires_seconds=_SIGNED_URL_EXPIRY_SECONDS)
+    url = storage.presign(target_key, expires_seconds=_SIGNED_URL_EXPIRY_SECONDS)
     url_type = "internal_stream" if url.startswith("/api/") else "presigned_s3"
 
     try:
-        meta = storage.read_metadata(session_id)
+        meta = storage.read_metadata(target_key)
         sha256 = meta.get("sha256", "unknown")
     except KeyError:
         sha256 = "metadata_unavailable"
@@ -285,6 +299,7 @@ async def get_clip_url(
     log.info(
         "review.clip_url_issued",
         session_id=session_id,
+        target_key=target_key,
         reviewer_id=reviewer_id,
         url_type=url_type,
         expires_in=_SIGNED_URL_EXPIRY_SECONDS,
@@ -334,8 +349,10 @@ async def stream_clip(
         reviewer_id = "dev_mode_no_auth"
 
     storage = get_storage()
+    target_key = _resolve_storage_key(session_id, storage)
+
     try:
-        clip_bytes = storage.read(session_id)
+        clip_bytes = storage.read(target_key)
     except KeyError:
         log_access_event(
             session_id=session_id,
@@ -344,7 +361,7 @@ async def stream_clip(
             outcome="denied",
             ip=ip,
         )
-        raise HTTPException(status_code=404, detail=f"Session {session_id!r} not found.")
+        raise HTTPException(status_code=404, detail=f"Session clip {session_id!r} not found.")
 
     log_access_event(
         session_id=session_id,

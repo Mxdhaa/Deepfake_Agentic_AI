@@ -138,7 +138,15 @@ class LocalFilesystemBackend:
 
     def __init__(self, root: str | Path | None = None) -> None:
         env_root = os.getenv("STORAGE_LOCAL_ROOT")
-        self.root = Path(root or env_root or "data/storage").resolve()
+        if env_root:
+            self.root = Path(env_root).resolve()
+        else:
+            base_dir = Path(__file__).resolve().parent.parent.parent  # backend root
+            backend_storage = base_dir / "data" / "storage"
+            if backend_storage.exists():
+                self.root = backend_storage
+            else:
+                self.root = Path("data/storage").resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         log.info("storage.local.init", root=str(self.root))
 
