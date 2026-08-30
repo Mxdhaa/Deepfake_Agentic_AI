@@ -1,9 +1,23 @@
 /**
  * API client for the Deepfake Agentic AI backend.
- * All requests go through NEXT_PUBLIC_API_URL (defaults to http://localhost:8000).
+ * Automatically routes through Next.js server-side rewrites (same-origin proxy)
+ * in production to bypass browser CORS / Cloudflare Turnstile blocks.
  */
+const getBaseUrl = (): string => {
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL.replace(/\/+$/, "");
+  }
+  if (typeof window !== "undefined") {
+    if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
+      return "http://localhost:8000";
+    }
+    // On Vercel / production domain: use same-origin relative proxy via next.config.ts rewrites
+    return "";
+  }
+  return "";
+};
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+export const BASE_URL = getBaseUrl();
 
 export interface DetectionResult {
   request_id: string;
@@ -92,6 +106,19 @@ export class ApiError extends Error {
   }
 }
 
+export async function safeFetch(url: string, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (err: any) {
+    if (err instanceof ApiError) throw err;
+    const isLocalhost = BASE_URL.includes("localhost") || BASE_URL.includes("127.0.0.1");
+    const hint = isLocalhost
+      ? `Ensure backend is running locally on ${BASE_URL} or configure NEXT_PUBLIC_API_URL in Vercel to your deployed Render URL.`
+      : `Cannot reach backend (${BASE_URL}). The Render service may still be building or waking up from sleep (~1-2 min).`;
+    throw new ApiError(0, hint);
+  }
+}
+
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const body = await res.text();
@@ -124,7 +151,7 @@ export async function detectDeepfake(file: File): Promise<DetectionResult> {
   const form = new FormData();
   form.append("file", file);
 
-  const res = await fetch(`${BASE_URL}/api/v1/detect`, {
+  const res = await safeFetch(`${BASE_URL}/api/v1/detect`, {
     method: "POST",
     body: form,
   });
@@ -136,7 +163,7 @@ export async function detectDeepfake(file: File): Promise<DetectionResult> {
  * Fetch backend health status.
  */
 export async function getHealth(): Promise<HealthResult> {
-  const res = await fetch(`${BASE_URL}/api/v1/health`, {
+  const res = await safeFetch(`${BASE_URL}/api/v1/health`, {
     cache: "no-store",
   });
   return handleResponse<HealthResult>(res);
@@ -151,7 +178,7 @@ export async function fetchReviewQueue(
   token: string = "",
 ): Promise<ReviewCase[]> {
   const url = `${BASE_URL}/api/v1/review/queue?status=${encodeURIComponent(status)}`;
-  const res = await fetch(url, {
+  const res = await safeFetch(url, {
     cache: "no-store",
     headers: {
       "X-Reviewer-Token": token,
@@ -167,7 +194,7 @@ export async function fetchReviewCase(
   caseId: string,
   token: string = "",
 ): Promise<ReviewCase> {
-  const res = await fetch(`${BASE_URL}/api/v1/review/queue/${caseId}`, {
+  const res = await safeFetch(`${BASE_URL}/api/v1/review/queue/${caseId}`, {
     cache: "no-store",
     headers: {
       "X-Reviewer-Token": token,
@@ -186,7 +213,7 @@ export async function submitReviewDecision(
   notes?: string,
   token: string = "",
 ): Promise<any> {
-  const res = await fetch(`${BASE_URL}/api/v1/review/queue/${caseId}/decision`, {
+  const res = await safeFetch(`${BASE_URL}/api/v1/review/queue/${caseId}/decision`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -209,7 +236,7 @@ export async function fetchClipAccess(
   sessionId: string,
   token: string = "",
 ): Promise<ClipAccessResponse> {
-  const res = await fetch(`${BASE_URL}/api/v1/review/${sessionId}/clip`, {
+  const res = await safeFetch(`${BASE_URL}/api/v1/review/${sessionId}/clip`, {
     cache: "no-store",
     headers: {
       "X-Reviewer-Token": token,
@@ -228,7 +255,7 @@ export async function fetchClipAccess(
 export async function fetchAuditChain(
   token: string = "",
 ): Promise<AuditBlock[]> {
-  const res = await fetch(`${BASE_URL}/api/v1/review/audit-chain`, {
+  const res = await safeFetch(`${BASE_URL}/api/v1/review/audit-chain`, {
     cache: "no-store",
     headers: {
       "X-Reviewer-Token": token,
@@ -243,7 +270,7 @@ export async function fetchAuditChain(
 export async function verifyAuditChain(
   token: string = "",
 ): Promise<ChainVerificationResult> {
-  const res = await fetch(`${BASE_URL}/api/v1/review/audit-chain/verify`, {
+  const res = await safeFetch(`${BASE_URL}/api/v1/review/audit-chain/verify`, {
     method: "POST",
     headers: {
       "X-Reviewer-Token": token,
@@ -278,7 +305,7 @@ export async function analyzeLiveness(
     if (challengeType) {
       form.append("challenge_type", challengeType);
     }
-    const res = await fetch(`${BASE_URL}/api/v1/liveness/analyze`, {
+    const res = await safeFetch(`${BASE_URL}/api/v1/liveness/analyze`, {
       method: "POST",
       body: form,
       signal: controller.signal,
@@ -317,7 +344,7 @@ export async function evaluatePipeline(
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const res = await fetch(`${BASE_URL}/api/v1/agent/evaluate`, {
+    const res = await safeFetch(`${BASE_URL}/api/v1/agent/evaluate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -383,7 +410,7 @@ export async function startVerification(payload: {
   stages_completed?: string[];
   challengeSequence?: string[];
 }> {
-  const res = await fetch(`${BASE_URL}/api/v1/verification/start`, {
+  const res = await safeFetch(`${BASE_URL}/api/v1/verification/start`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -395,7 +422,7 @@ export async function startVerification(payload: {
  * 2. Get full state of session by referenceId (used on page refresh/reconstruct)
  */
 export async function getVerificationStatus(referenceId: string): Promise<VerificationSessionState> {
-  const res = await fetch(`${BASE_URL}/api/v1/verification/${referenceId}/status`, {
+  const res = await safeFetch(`${BASE_URL}/api/v1/verification/${referenceId}/status`, {
     cache: "no-store",
   });
   return handleResponse<VerificationSessionState>(res);
@@ -411,7 +438,7 @@ export async function lookupVerificationByCkyc(ckycNumber: string): Promise<{
   referenceId?: string | null;
   sessionStatus?: string;
 }> {
-  const res = await fetch(`${BASE_URL}/api/v1/verification/lookup?ckycNumber=${encodeURIComponent(ckycNumber)}`, {
+  const res = await safeFetch(`${BASE_URL}/api/v1/verification/lookup?ckycNumber=${encodeURIComponent(ckycNumber)}`, {
     cache: "no-store",
   });
   return handleResponse<any>(res);
@@ -426,7 +453,7 @@ export async function sendVerificationOtp(referenceId: string): Promise<{
   demoOtp?: string;
   expiresInSeconds: number;
 }> {
-  const res = await fetch(`${BASE_URL}/api/v1/verification/${referenceId}/otp/send`, {
+  const res = await safeFetch(`${BASE_URL}/api/v1/verification/${referenceId}/otp/send`, {
     method: "POST",
   });
   return handleResponse<any>(res);
@@ -441,7 +468,7 @@ export async function verifyVerificationOtp(referenceId: string, otp: string): P
   remainingAttempts: number;
   message?: string;
 }> {
-  const res = await fetch(`${BASE_URL}/api/v1/verification/${referenceId}/otp/verify`, {
+  const res = await safeFetch(`${BASE_URL}/api/v1/verification/${referenceId}/otp/verify`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ otp }),
@@ -465,21 +492,11 @@ export async function uploadVerificationDocument(
   const form = new FormData();
   const filename = (documentFile instanceof File && documentFile.name) ? documentFile.name : "id_document.jpg";
   form.append("document", documentFile, filename);
-  try {
-    const res = await fetch(`${BASE_URL}/api/v1/verification/${referenceId}/document`, {
-      method: "POST",
-      body: form,
-    });
-    return handleResponse<any>(res);
-  } catch (err: any) {
-    if (err instanceof ApiError) throw err;
-    throw new ApiError(
-      500,
-      err?.message === "Failed to fetch"
-        ? `Unable to reach verification backend at ${BASE_URL}. Please ensure the backend server is running and CORS is configured.`
-        : (err?.message || "Document verification failed. Please try again.")
-    );
-  }
+  const res = await safeFetch(`${BASE_URL}/api/v1/verification/${referenceId}/document`, {
+    method: "POST",
+    body: form,
+  });
+  return handleResponse<any>(res);
 }
 
 /**
@@ -506,7 +523,7 @@ export async function submitVerificationLiveness(
   if (challengeType) {
     form.append("challenge_type", challengeType);
   }
-  const res = await fetch(`${BASE_URL}/api/v1/verification/${referenceId}/liveness`, {
+  const res = await safeFetch(`${BASE_URL}/api/v1/verification/${referenceId}/liveness`, {
     method: "POST",
     body: form,
   });
@@ -531,7 +548,7 @@ export async function finalizeVerification(referenceId: string): Promise<{
   challengeSequence?: string[];
   agentReasoningTrace?: any;
 }> {
-  const res = await fetch(`${BASE_URL}/api/v1/verification/${referenceId}/finalize`, {
+  const res = await safeFetch(`${BASE_URL}/api/v1/verification/${referenceId}/finalize`, {
     method: "POST",
   });
   return handleResponse<any>(res);
@@ -547,7 +564,7 @@ export async function submitSessionReviewDecision(
   notes?: string,
   token: string = "",
 ): Promise<any> {
-  const res = await fetch(`${BASE_URL}/api/v1/review/${referenceId}/decision`, {
+  const res = await safeFetch(`${BASE_URL}/api/v1/review/${referenceId}/decision`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -561,4 +578,3 @@ export async function submitSessionReviewDecision(
   });
   return handleResponse<any>(res);
 }
-
