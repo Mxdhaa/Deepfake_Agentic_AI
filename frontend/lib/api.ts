@@ -475,10 +475,11 @@ export async function verifyVerificationOtp(referenceId: string, otp: string): P
 }
 
 /**
- * Fast client-side image compression (HTML5 Canvas) to guarantee sub-second uploads
- * and avoid Vercel / serverless payload size limits (4.5MB limit).
+ * Client-side image normalization: only downscales extremely large images (>2000px).
+ * Uses high quality (0.97) to preserve small portrait details on Aadhaar / ID cards.
+ * The Vercel proxy proxies server-to-server so payload size limits are not a concern.
  */
-async function compressImageForUpload(file: File | Blob, maxDim = 1200, quality = 0.85): Promise<Blob> {
+async function compressImageForUpload(file: File | Blob, maxDim = 2000, quality = 0.97): Promise<Blob> {
   if (typeof window === "undefined" || !(file instanceof Blob)) {
     return file;
   }

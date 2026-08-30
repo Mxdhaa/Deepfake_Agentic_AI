@@ -427,14 +427,21 @@ class VerificationService:
 
         log.info("verification_service.doc_face_extracted", mode=face_mode, has_face=has_document_face)
 
-        # NOTE: We do NOT hard-block on face detection failure here.
-        # The authoritative document validation is OCR name+DOB matching against the registry.
-        # The face embedding (if extracted) is used for 1:1 matching in the liveness step.
-        # Aadhaar cards with tiny/laminated portrait photos may not yield a face crop — that is fine.
+        # SECURITY GATE: A face embedding from the document is required for the 1:1 liveness comparison.
+        # The structural fallback above guarantees we always attempt extraction on a valid image.
+        # If has_document_face is still False after all attempts, the image is not a valid photo ID.
         if not has_document_face:
-            log.warning("verification_service.doc_no_face_embedding",
-                        note="No face crop extracted from document — proceeding to OCR validation.")
-            session.decision_table.document_face = "UNDETECTED"
+            session.document_match = False
+            session.decision_table.document = "NO_MATCH"
+            session.decision_table.document_face = "NO_MATCH"
+            session.updated_at = datetime.now(timezone.utc).isoformat()
+            self._save_sessions()
+            return (
+                False,
+                {},
+                {"portrait_photo": "mismatch", "document_structure": "match", "name": "mismatch", "dob": "mismatch"},
+                "No portrait photo detected on the uploaded ID card. Please ensure the card is well-lit, unobstructed, and clearly shows your face.",
+            )
 
         # 3. Dynamic OCR Text Extraction & Cross-Check against Registry
         ocr_matched, extracted_data, field_checks, ocr_error = parse_and_validate_id_document(
