@@ -148,3 +148,7 @@ Desktop.ini
 *.swp
 *.swo
 *~
+
+# Assignment files
+assignment_files/
+

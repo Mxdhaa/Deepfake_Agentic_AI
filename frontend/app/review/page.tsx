@@ -13,6 +13,8 @@ import {
   ChainVerificationResult,
   ClipAccessResponse,
 } from "@/lib/api";
+import SpatialHeatmapViewer from "@/components/SpatialHeatmapViewer";
+
 
 // ─── Clean Vector SVG Icon Components (NO EMOJIS) ─────────────────────────────
 
@@ -1168,70 +1170,15 @@ export default function ReviewPage() {
 
                 {/* Evidence & Telemetry Section */}
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1.5rem" }}>
-                  {/* Archived Live Video Evidence Box */}
-                  <div
-                    style={{
-                      padding: "1.25rem",
-                      borderRadius: "8px",
-                      background: "#111827",
-                      border: "1px solid #1F2937",
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "12px",
-                    }}
-                  >
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <span style={{ fontSize: "0.875rem", fontWeight: 700, color: "#FFFFFF", letterSpacing: "0.03em" }}>
-                        ARCHIVED LIVE CLIP
-                      </span>
-                      <span style={{ fontSize: "0.75rem", color: "#10B981", fontWeight: 600, display: "flex", alignItems: "center", gap: "6px" }}>
-                        <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#10B981" }} />
-                        HMAC STREAM ACTIVE
-                      </span>
-                    </div>
+                  {/* Archived Live Video & Spatial Grad-CAM Heatmap Box */}
+                  <SpatialHeatmapViewer
+                    deepfakeScore={selectedCase.signals?.deepfake_score || 0.08}
+                    faceSimilarity={selectedCase.signals?.cosine_similarity_score || 0.91}
+                    videoUrl={clipAccess?.url || null}
+                    caseId={selectedCase.case_id}
+                    legalName={selectedCase.legal_name}
+                  />
 
-                    <div
-                      style={{
-                        width: "100%",
-                        aspectRatio: "16/10",
-                        background: "#000000",
-                        borderRadius: "6px",
-                        overflow: "hidden",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        border: "1px solid #1F2937",
-                      }}
-                    >
-                      {loadingClip ? (
-                        <div style={{ color: "#9CA3AF", fontSize: "0.85rem" }}>
-                          Loading signed clip stream...
-                        </div>
-                      ) : clipError ? (
-                        <div style={{ color: "#FCA5A5", fontSize: "0.8rem", padding: "1rem", textAlign: "center", display: "flex", alignItems: "center", gap: "8px" }}>
-                          <AlertTriangleIcon size={16} color="#FCA5A5" />
-                          <span>{clipError}</span>
-                        </div>
-                      ) : clipAccess?.url ? (
-                        <video
-                          key={clipAccess.url}
-                          controls
-                          autoPlay
-                          muted
-                          loop
-                          src={clipAccess.url}
-                          style={{ width: "100%", height: "100%", objectFit: "contain" }}
-                        />
-                      ) : (
-                        <div style={{ color: "#9CA3AF", fontSize: "0.8rem" }}>No video clip recorded for this session</div>
-                      )}
-                    </div>
-
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.75rem", fontFamily: "var(--font-mono)", color: "#9CA3AF" }}>
-                      <span>SHA-256: {clipAccess?.sha256 ? `${clipAccess.sha256.slice(0, 16)}...` : "Verified"}</span>
-                      <span>Expires in {clipAccess?.expires_in || 600}s</span>
-                    </div>
-                  </div>
 
                   {/* Physiological & Identity Telemetry Grid */}
                   <div
