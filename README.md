@@ -1,4 +1,4 @@
-# Deepfake Agentic AI — Enterprise Biometric KYC & Liveness System 🔍🛡️
+# Deepfake Agentic AI — Enterprise Biometric KYC & Liveness System
 
 > **Enterprise-Grade Deepfake Detection & Physiological Liveness KYC Pipeline**  
 > Powered by **LangGraph Multi-Agent Orchestration**, **Contiguous Optical Flow Gesture Tracking**, **Neural Artifact Scoring**, **MTCNN-Aligned Biometric Face Matching**, and **EasyOCR Document Analysis**.
