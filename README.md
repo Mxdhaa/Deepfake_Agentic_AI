@@ -12,13 +12,13 @@
 
 ---
 
-## 📌 Executive Summary
+##  Executive Summary
 
 Modern Identity Verification (KYC) systems are increasingly vulnerable to AI-generated deepfakes, video replay attacks, and digital face-swaps. **Deepfake Agentic AI** provides a 4-step autonomous verification pipeline that combines real-time physiological liveness challenges, deepfake neural artifact detection, and biometric face verification within a tamper-evident audit ledger.
 
 ---
 
-## 🏛️ System Architecture
+##  System Architecture
 
 ![System Architecture Diagram](docs/assets/system_architecture.jpg)
 
@@ -61,7 +61,7 @@ Aggregates 10 identity verification signals. Borderline scores trigger an automa
 
 ---
 
-## 📁 Repository Structure
+##  Repository Structure
 
 ```
 Deepfake_Agentic_AI/
@@ -94,7 +94,7 @@ Deepfake_Agentic_AI/
 
 ---
 
-## 🚀 Local Quick Start & Running Instructions
+##  Local Quick Start & Running Instructions
 
 ### Prerequisites
 * **Python**: 3.11+
@@ -147,7 +147,7 @@ npm run dev
 
 ---
 
-## 🌐 Deploying to GitHub & Production
+## Deploying to GitHub & Production
 
 ### 1. Push Code to GitHub
 
@@ -184,7 +184,7 @@ docker run -d -p 8000:8000 deepfake-backend
 
 ---
 
-## 📊 Verification Decision Breakdown
+## Verification Decision Breakdown
 
 | Signal Category | Signal Name | Pass Condition |
 | :--- | :--- | :--- |
@@ -198,7 +198,7 @@ docker run -d -p 8000:8000 deepfake-backend
 
 ---
 
-## 📄 License
+##  License
 
 Distributed under the **MIT License**. See [`LICENSE`](LICENSE) for details.
 
